@@ -12,16 +12,16 @@ using NUnit.Framework;
 
 namespace Tests.UserTests.Test3847
 {
-	public class OutfeedTransportOrderDTO
-	{
-		public virtual Guid Id { get; set; }
-	}
-
 	[TestFixture]
 	public class Issue3847Tests : TestBase
 	{
+		public class OutfeedTransportOrderDTO
+		{
+			public virtual Guid Id { get; set; }
+		}
+
 		[Test]
-		public void Test3847([IncludeDataSources(TestProvName.AllSQLite, TestProvName.AllSqlServer, TestProvName.AllPostgreSQL)] string configuration)
+		public void Test3847([IncludeDataSources(true, TestProvName.AllSQLite, TestProvName.AllSqlServer, TestProvName.AllPostgreSQL)] string configuration)
 		{
 			var ms = new MappingSchema();
 			var mb = ms.GetFluentMappingBuilder();
@@ -43,12 +43,10 @@ namespace Tests.UserTests.Test3847
 								  OutfeedTransportOrder = outfeed,
 								  LastCheck = lastcheckquery.Where(x => x.Key == outfeed.Id).Select(x => (DateTime?)x.Value).FirstOrDefault(),
 								  NextCheck = nextcheckquery.Where(x => x.Key == outfeed.Id).Select(x => (DateTime?)x.Value).FirstOrDefault(),
-								 
 							  };
 
 					var d = qry.ToList();
-					var sql = ((DataConnection)db).LastQuery;
-				}				
+				}
 			}
 		}
 	}
