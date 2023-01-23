@@ -72,7 +72,7 @@ namespace LinqToDB.Expressions
 		public static LambdaExpression UnwrapLambda(this Expression ex)
 			=> (LambdaExpression)((UnaryExpression)ex).Operand.Unwrap();
 
-		[return: NotNullIfNotNull("ex")]
+		[return: NotNullIfNotNull(nameof(ex))]
 		public static Expression? Unwrap(this Expression? ex)
 		{
 			if (ex == null)
@@ -89,7 +89,7 @@ namespace LinqToDB.Expressions
 			return ex;
 		}
 
-		[return: NotNullIfNotNull("ex")]
+		[return: NotNullIfNotNull(nameof(ex))]
 		public static Expression? UnwrapConvert(this Expression? ex)
 		{
 			if (ex == null)
@@ -109,7 +109,7 @@ namespace LinqToDB.Expressions
 			return ex;
 		}
 
-		[return: NotNullIfNotNull("ex")]
+		[return: NotNullIfNotNull(nameof(ex))]
 		public static Expression? UnwrapConvertToObject(this Expression? ex)
 		{
 			if (ex == null)
@@ -130,7 +130,7 @@ namespace LinqToDB.Expressions
 			return ex;
 		}
 
-		[return: NotNullIfNotNull("ex")]
+		[return: NotNullIfNotNull(nameof(ex))]
 		public static Expression? UnwrapWithAs(this Expression? ex)
 		{
 			return ex?.NodeType switch
@@ -219,7 +219,7 @@ namespace LinqToDB.Expressions
 			return accessors;
 		}
 
-		[return: NotNullIfNotNull("expr")]
+		[return: NotNullIfNotNull(nameof(expr))]
 		public static Expression? GetRootObject(Expression? expr, MappingSchema mapping)
 		{
 			if (expr == null)
@@ -339,10 +339,7 @@ namespace LinqToDB.Expressions
 
 		public static bool IsExtensionMethod(this MethodCallExpression methodCall, MappingSchema mapping)
 		{
-			var functions = mapping.GetAttributes<Sql.ExtensionAttribute>(methodCall.Method.ReflectedType!,
-				methodCall.Method,
-				static f => f.Configuration);
-			return functions.Any();
+			return mapping.HasAttribute<Sql.ExtensionAttribute>(methodCall.Method.ReflectedType!, methodCall.Method);
 		}
 
 		public static bool IsQueryable(this MethodCallExpression method, string name)
@@ -404,7 +401,7 @@ namespace LinqToDB.Expressions
 
 		public static bool IsAssociation(this MethodCallExpression method, MappingSchema mappingSchema)
 		{
-			return mappingSchema.GetAttribute<AssociationAttribute>(method.Method.DeclaringType!, method.Method) != null;
+			return mappingSchema.HasAttribute<AssociationAttribute>(method.Method.DeclaringType!, method.Method);
 		}
 
 		private static readonly string[] CteMethodNames = { "AsCte", "GetCte" };
@@ -574,7 +571,7 @@ namespace LinqToDB.Expressions
 		/// </summary>
 		/// <param name="expression">Expression to optimize.</param>
 		/// <returns>Optimized expression.</returns>
-		[return: NotNullIfNotNull("expression")]
+		[return: NotNullIfNotNull(nameof(expression))]
 		public static Expression? OptimizeExpression(this Expression? expression, MappingSchema mappingSchema)
 		{
 			return TransformInfoVisitor<MappingSchema>.Create(mappingSchema, OptimizeExpressionTransformer).Transform(expression);

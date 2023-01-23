@@ -49,7 +49,7 @@ namespace LinqToDB.Expressions
 			if (_finalized)
 				throw new LinqToDBException($"Wrappers registration is not allowed after {nameof(FinalizeMappings)}() call");
 
-			var wrapperAttr = wrapperType.GetCustomAttribute<WrapperAttribute>(true);
+			var wrapperAttr = wrapperType.GetAttribute<WrapperAttribute>();
 
 			if ((wrapperAttr?.TypeName ?? wrapperType.Name) != originalType.Name)
 				throw new LinqToDBException($"Original and wraped types should have same type name. {wrapperType.Name} != {originalType.Name}");
@@ -121,8 +121,8 @@ namespace LinqToDB.Expressions
 			if (hasDifferentValues)
 			{
 				// this should never happen, but it we will have such situation it is better to fail
-				if (wrapperType.GetCustomAttribute(typeof(FlagsAttribute)) != null
-					|| originalType.GetCustomAttribute(typeof(FlagsAttribute)) != null)
+				if (wrapperType.HasAttribute<FlagsAttribute>()
+					|| originalType.HasAttribute<FlagsAttribute>())
 					throw new LinqToDBException($"Flags enums {wrapperType} and {originalType} are not compatible by values");
 
 				// build dictionary-based converters
@@ -700,8 +700,8 @@ namespace LinqToDB.Expressions
 						{
 							var mc = (MethodCallExpression)e;
 
-							var methodName         = mc.Method.GetCustomAttribute<TypeWrapperNameAttribute>()?.Name ?? mc.Method.Name;
-							var customReturnMapper = context.Mapper.CreateTypeMapper(mc.Method.ReturnParameter.GetCustomAttribute<CustomMapperAttribute>()?.Mapper);
+							var methodName         = mc.Method.GetAttribute<TypeWrapperNameAttribute>()?.Name ?? mc.Method.Name;
+							var customReturnMapper = context.Mapper.CreateTypeMapper(mc.Method.ReturnParameter.GetAttribute<CustomMapperAttribute>()?.Mapper);
 
 							if (context.Mapper.TryMapType(mc.Method.DeclaringType!, out var replacement))
 							{
@@ -802,7 +802,7 @@ namespace LinqToDB.Expressions
 			return ctx.Aborted ? null : converted;
 		}
 
-		[return: NotNullIfNotNull("mapperType")]
+		[return: NotNullIfNotNull(nameof(mapperType))]
 		private ICustomMapper? CreateTypeMapper(Type? mapperType)
 		{
 			if (mapperType == null)
@@ -1248,7 +1248,7 @@ namespace LinqToDB.Expressions
 
 		#endregion
 
-		[return: NotNullIfNotNull("instance")]
+		[return: NotNullIfNotNull(nameof(instance))]
 		public TR? Wrap<TR>(object? instance)
 			where TR: TypeWrapper
 		{
@@ -1258,7 +1258,7 @@ namespace LinqToDB.Expressions
 			return (TR)Wrap(typeof(TR), instance);
 		}
 
-		[return: NotNullIfNotNull("instance")]
+		[return: NotNullIfNotNull(nameof(instance))]
 		private object? Wrap(Type wrapperType, object? instance)
 		{
 			if (instance == null)
