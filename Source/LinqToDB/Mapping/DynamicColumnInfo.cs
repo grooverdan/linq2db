@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
 using LinqToDB.Common;
@@ -8,7 +9,7 @@ namespace LinqToDB.Mapping
 	/// <summary>
 	/// Represents a dynamic column, which doesn't have a backing field in it's declaring type.
 	/// </summary>
-	/// <seealso cref="System.Reflection.MemberInfo" />
+	/// <seealso cref="MemberInfo" />
 	public class DynamicColumnInfo : PropertyInfo, IEquatable<DynamicColumnInfo>
 	{
 		private static readonly MethodInfo _dummyGetter = typeof(DynamicColumnInfo).GetMethod(nameof(DummyGetter), BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -98,13 +99,23 @@ namespace LinqToDB.Mapping
 		public static bool operator !=(DynamicColumnInfo? a, DynamicColumnInfo? b)
 			=> !a?.Equals(b) ?? !ReferenceEquals(b, null);
 
+
+#pragma warning disable RS0030 // Do not used banned APIs
 		/// <inheritdoc cref="MemberInfo.GetCustomAttributes(bool)"/>
 		public override object[] GetCustomAttributes(bool inherit)
+#pragma warning restore RS0030 // Do not used banned APIs
 			=> Array<object>.Empty;
 
+
+#pragma warning disable RS0030 // Do not used banned APIs
 		/// <inheritdoc cref="MemberInfo.GetCustomAttributes(Type, bool)"/>
 		public override object[] GetCustomAttributes(Type attributeType, bool inherit)
+#pragma warning restore RS0030 // Do not used banned APIs
 			=> Array<object>.Empty;
+
+		/// <inheritdoc cref="MemberInfo.GetCustomAttributesData()"/>
+		public override IList<CustomAttributeData> GetCustomAttributesData()
+			=> Array<CustomAttributeData>.Empty;
 
 		/// <inheritdoc cref="MemberInfo.IsDefined"/>
 		public override bool IsDefined(Type attributeType, bool inherit)

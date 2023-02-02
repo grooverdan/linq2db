@@ -73,7 +73,7 @@ namespace LinqToDB.Reflection
 
 			// ObjectFactory
 			//
-			var attr = type.GetFirstAttribute<ObjectFactoryAttribute>();
+			var attr = type.GetAttribute<ObjectFactoryAttribute>();
 
 			if (attr != null)
 				_objectFactory = attr.ObjectFactory;
@@ -89,7 +89,7 @@ namespace LinqToDB.Reflection
 			throw new LinqToDBException($"Cant create an instance of abstract class '{typeof(T).FullName}'.");
 		}
 
-		static readonly List<MemberInfo> _members = new List<MemberInfo>();
+		static readonly List<MemberInfo> _members = new();
 		static readonly IObjectFactory?  _objectFactory;
 
 		internal TypeAccessor()
