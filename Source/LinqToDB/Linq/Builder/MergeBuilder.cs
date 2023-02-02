@@ -12,7 +12,7 @@ namespace LinqToDB.Linq.Builder
 
 	using static LinqToDB.Reflection.Methods.LinqToDB.Merge;
 
-	internal partial class MergeBuilder : MethodCallBuilder
+	internal sealed partial class MergeBuilder : MethodCallBuilder
 	{
 		static readonly MethodInfo[] _supportedMethods = {ExecuteMergeMethodInfo, MergeWithOutput, MergeWithOutputInto};
 
@@ -32,7 +32,7 @@ namespace LinqToDB.Linq.Builder
 		{
 			var mergeContext = (MergeContext)builder.BuildSequence(new BuildInfo(buildInfo, methodCall.Arguments[0]));
 
-			var kind = MergeKind.Merge; 
+			var kind = MergeKind.Merge;
 
 			if (methodCall.IsSameGenericMethod(MergeWithOutputInto))
 				kind = MergeKind.MergeWithOutputInto;
@@ -101,8 +101,7 @@ namespace LinqToDB.Linq.Builder
 			return mergeContext;
 		}
 
-
-		class MergeOutputContext : SelectContext
+		sealed class MergeOutputContext : SelectContext
 		{
 			public MergeOutputContext(IBuildContext? parent, LambdaExpression lambda, MergeContext mergeContext, IBuildContext emptyTable, IBuildContext deletedTable, IBuildContext insertedTable)
 				: base(parent, lambda, emptyTable, deletedTable, insertedTable)
@@ -120,17 +119,10 @@ namespace LinqToDB.Linq.Builder
 
 				var mergeStatement = (SqlMergeStatement)Statement!;
 
-				mergeStatement.Output!.OutputQuery = Sequence[0].SelectQuery;
+				mergeStatement.Output!.OutputColumns = Sequence[0].SelectQuery.Select.Columns.Select(c => c.Expression).ToList();
 
 				QueryRunner.SetRunQuery(query, mapper);
 			}
-		}
-
-
-		protected override SequenceConvertInfo? Convert(
-			ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo, ParameterExpression? param)
-		{
-			return null;
 		}
 
 		private static SelectQuery RemoveContextFromQuery(TableBuilder.TableContext tableContext, SelectQuery query)
@@ -214,10 +206,11 @@ namespace LinqToDB.Linq.Builder
 				query     = RemoveContextFromQuery(clonedContext, query);
 
 				//TODO: Why it is not handled by main optimizer
-				var sqlFlags = builder.DataContext.SqlProviderFlags;
-				new SelectQueryOptimizer(sqlFlags, query, query, 0, statement)
-					.FinalizeAndValidate(sqlFlags.IsApplyJoinSupported, sqlFlags.IsGroupByExpressionSupported);
-				
+				var sqlFlags    = builder.DataContext.SqlProviderFlags;
+
+				new SelectQueryOptimizer(sqlFlags, builder.DataContext.Options, query, query, 0, statement)
+					.FinalizeAndValidate(sqlFlags.IsApplyJoinSupported);
+
 				if (query.From.Tables.Count == 0)
 				{
 					result = query.Where.SearchCondition;

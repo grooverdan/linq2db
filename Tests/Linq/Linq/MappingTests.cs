@@ -116,7 +116,7 @@ namespace Tests.Linq
 		}
 
 		[Table("Parent")]
-		class TestParent
+		sealed class TestParent
 		{
 			[Column] public int       ParentID;
 			[Column] public TestValue Value1;
@@ -129,7 +129,7 @@ namespace Tests.Linq
 				db.GetTable<TestParent>().Where(p => p.Value1 == TestValue.Value1).ToList();
 		}
 
-		internal class LinqDataTypes
+		internal sealed class LinqDataTypes
 		{
 			public TestValue ID;
 		}
@@ -180,7 +180,7 @@ namespace Tests.Linq
 		public class ParentObject
 		{
 			[Column]                      public int   ParentID;
-			[Column("Value1", ".Value1")] public Inner Value = new Inner();
+			[Column("Value1", ".Value1")] public Inner Value = new ();
 
 			public class Inner
 			{
@@ -236,13 +236,13 @@ namespace Tests.Linq
 		}
 
 		[Table(Name="Parent")]
-		class MyParent
+		sealed class MyParent
 		{
 			[Column] public MyInt ParentID;
 			[Column] public int?  Value1;
 		}
 
-		class MyMappingSchema : MappingSchema
+		sealed class MyMappingSchema : MappingSchema
 		{
 			public MyMappingSchema()
 			{
@@ -252,7 +252,7 @@ namespace Tests.Linq
 			}
 		}
 
-		static readonly MyMappingSchema _myMappingSchema = new MyMappingSchema();
+		static readonly MyMappingSchema _myMappingSchema = new ();
 
 		[Test]
 		public void MyType1()
@@ -293,7 +293,7 @@ namespace Tests.Linq
 		[Test]
 		public void MyType4()
 		{
-			using (var db = (TestDataConnection) new TestDataConnection().AddMappingSchema(_myMappingSchema))
+			using (var db = (TestDataConnection)new TestDataConnection().AddMappingSchema(_myMappingSchema))
 			{
 				try
 				{
@@ -310,7 +310,7 @@ namespace Tests.Linq
 		[Test]
 		public void MyType5()
 		{
-			using (var db = (TestDataConnection) new TestDataConnection().AddMappingSchema(_myMappingSchema))
+			using (var db = (TestDataConnection)new TestDataConnection().AddMappingSchema(_myMappingSchema))
 			{
 				try
 				{
@@ -324,7 +324,7 @@ namespace Tests.Linq
 		}
 
 		[Table("Parent")]
-		class MyParent1
+		sealed class MyParent1
 		{
 			[Column] public int  ParentID;
 			[Column] public int? Value1;
@@ -378,7 +378,7 @@ namespace Tests.Linq
 		}
 
 		[Table("Person")]
-		class Table171
+		sealed class Table171
 		{
 			[Column] public Gender Gender;
 		}
@@ -444,17 +444,19 @@ namespace Tests.Linq
 		{
 			GetProviderName(context, out var isLinqService);
 
-			using (new CustomCommandProcessor(null))
-			using (var db = GetDataContext(context, testLinqService : false))
+			using (var db = GetDataContext(context, testLinqService : false, suppressSequentialAccess: true))
 			{
-#if NET472
 				if (isLinqService)
 				{
-					var fe = Assert.Throws<FaultException<ExceptionDetail>>(() => db.GetTable<BadMapping>().Select(_ => new { _.NotInt }).ToList())!;
+#if NETFRAMEWORK
+					var fe = Assert.Throws<FaultException>(() => db.GetTable<BadMapping>().Select(_ => new { _.NotInt }).ToList())!;
 					Assert.True(fe.Message.ToLowerInvariant().Contains("firstname"));
+#else
+					var fe = Assert.Throws<Grpc.Core.RpcException>(() => db.GetTable<BadMapping>().Select(_ => new { _.NotInt }).ToList())!;
+					Assert.True(fe.Message.ToLowerInvariant().Contains("firstname"));
+#endif
 				}
 				else
-#endif
 				{
 					var ex = Assert.Throws<LinqToDBConvertException>(() => db.GetTable<BadMapping>().Select(_ => new { _.NotInt }).ToList())!;
 					// field name casing depends on database
@@ -468,11 +470,10 @@ namespace Tests.Linq
 		{
 			GetProviderName(context, out var isLinqService);
 
-			using (new CustomCommandProcessor(null))
-			using (var db = GetDataContext(context))
+			using (var db = GetDataContext(context, suppressSequentialAccess: true))
 			{
 				var ex = Assert.Throws<LinqToDBConvertException>(() => db.GetTable<BadMapping>().Select(_ => new { _.BadEnum }).ToList())!;
-				Assert.AreEqual("lastname", ex.ColumnName!.ToLower());
+				Assert.AreEqual("lastname", ex.ColumnName!.ToLowerInvariant());
 			}
 		}
 
@@ -534,7 +535,7 @@ namespace Tests.Linq
 			}
 		}
 
-		#region Records
+#region Records
 
 		public record Record(int Id, string Value, string BaseValue) : RecordBase(Id, BaseValue);
 		public abstract record RecordBase(int Id, string BaseValue);
@@ -574,13 +575,15 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void TestRecordMapping([IncludeDataSources(true, TestProvName.AllSQLite)] string context)
+		public void TestRecordMapping([IncludeDataSources(true, TestProvName.AllSQLite, TestProvName.AllClickHouse)] string context)
 		{
 			var ms = new MappingSchema();
-			ms.GetFluentMappingBuilder().Entity<Record>()
-				.Property(p => p.Id).IsPrimaryKey()
-				.Property(p => p.Value)
-				.Property(p => p.BaseValue);
+			new FluentMappingBuilder(ms)
+				.Entity<Record>()
+					.Property(p => p.Id).IsPrimaryKey()
+					.Property(p => p.Value)
+					.Property(p => p.BaseValue)
+				.Build();
 
 			using (var db = GetDataContext(context, ms))
 			using (var table = db.CreateLocalTable<Record>())
@@ -611,13 +614,15 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void TestRecordLikeMapping([IncludeDataSources(true, TestProvName.AllSQLite)] string context)
+		public void TestRecordLikeMapping([IncludeDataSources(true, TestProvName.AllSQLite, TestProvName.AllClickHouse)] string context)
 		{
 			var ms = new MappingSchema();
-			ms.GetFluentMappingBuilder().Entity<RecordLike>()
-				.Property(p => p.Id).IsPrimaryKey()
-				.Property(p => p.Value)
-				.Property(p => p.BaseValue);
+			new FluentMappingBuilder(ms)
+				.Entity<RecordLike>()
+					.Property(p => p.Id).IsPrimaryKey()
+					.Property(p => p.Value)
+					.Property(p => p.BaseValue)
+				.Build();
 
 			using (var db = GetDataContext(context, ms))
 			using (var table = db.CreateLocalTable<RecordLike>())
@@ -648,12 +653,14 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void TestInitOnly([IncludeDataSources(true, TestProvName.AllSQLite)] string context)
+		public void TestInitOnly([IncludeDataSources(true, TestProvName.AllSQLite, TestProvName.AllClickHouse)] string context)
 		{
 			var ms = new MappingSchema();
-			ms.GetFluentMappingBuilder().Entity<WithInitOnly>()
-				.Property(p => p.Id).IsPrimaryKey()
-				.Property(p => p.Value);
+			new FluentMappingBuilder(ms)
+				.Entity<WithInitOnly>()
+					.Property(p => p.Id).IsPrimaryKey()
+					.Property(p => p.Value)
+				.Build();
 
 			using (var db = GetDataContext(context, ms))
 			using (var table = db.CreateLocalTable<WithInitOnly>())
@@ -683,6 +690,6 @@ namespace Tests.Linq
 			}
 		}
 
-		#endregion
+#endregion
 	}
 }

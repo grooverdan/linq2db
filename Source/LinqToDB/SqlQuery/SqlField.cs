@@ -4,7 +4,8 @@ using System.Text;
 
 namespace LinqToDB.SqlQuery
 {
-	using LinqToDB.Common;
+	using Common;
+	using Common.Internal;
 	using Mapping;
 
 	public class SqlField : ISqlExpression
@@ -94,7 +95,7 @@ namespace LinqToDB.SqlQuery
 		public ISqlTableSource?  Table             { get; set; }
 		public ColumnDescriptor  ColumnDescriptor  { get; set; } = null!; // TODO: not true, we probably should introduce something else for non-column fields
 
-		Type ISqlExpression.SystemType => Type.SystemType; 
+		Type ISqlExpression.SystemType => Type.SystemType;
 
 		private string? _physicalName;
 		public  string   PhysicalName
@@ -109,7 +110,8 @@ namespace LinqToDB.SqlQuery
 
 		public override string ToString()
 		{
-			return ((IQueryElement)this).ToString(new StringBuilder(), new Dictionary<IQueryElement, IQueryElement>()).ToString();
+			using var sb = Pools.StringBuilder.Allocate();
+			return ((IQueryElement)this).ToString(sb.Value, new Dictionary<IQueryElement, IQueryElement>()).ToString();
 		}
 
 //#endif

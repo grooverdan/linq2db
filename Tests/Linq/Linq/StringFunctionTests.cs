@@ -255,7 +255,7 @@ namespace Tests.Linq
 			}
 		}
 
-#if NETSTANDARD2_1PLUS
+#if NETCOREAPP3_1_OR_GREATER
 		[Test]
 		public void ContainsConstantWithCase1([DataSources(ProviderName.SqlCe)] string context)
 		{
@@ -473,11 +473,11 @@ namespace Tests.Linq
 					case StringComparison.OrdinalIgnoreCase : 
 					case StringComparison.InvariantCultureIgnoreCase : 
 					case StringComparison.CurrentCultureIgnoreCase : 
-						nameToCheck = nameToCheck.ToUpper();
+						nameToCheck = nameToCheck.ToUpperInvariant();
 						break;
 				}
 
-				db.Person.Count(p => p.FirstName.StartsWith(nameToCheck, comparison)  && p.ID == 1).Should().Be(1);
+				db.Person.Count(p =>  p.FirstName.StartsWith(nameToCheck, comparison) && p.ID == 1).Should().Be(1);
 				db.Person.Count(p => !p.FirstName.StartsWith(nameToCheck, comparison) && p.ID == 1).Should().Be(0);
 
 				switch (comparison)
@@ -487,9 +487,9 @@ namespace Tests.Linq
 					case StringComparison.InvariantCulture : 
 					{
 						nameToCheck = firstName.Substring(0, 3);
-						nameToCheck = nameToCheck.ToUpper();
+						nameToCheck = nameToCheck.ToUpperInvariant();
 
-						db.Person.Count(p => p.FirstName.StartsWith(nameToCheck, comparison)  && p.ID == 1).Should().Be(0);
+						db.Person.Count(p =>  p.FirstName.StartsWith(nameToCheck, comparison) && p.ID == 1).Should().Be(0);
 						db.Person.Count(p => !p.FirstName.StartsWith(nameToCheck, comparison) && p.ID == 1).Should().Be(1);
 
 						break;
@@ -513,17 +513,17 @@ namespace Tests.Linq
 		public void StartsWith1IgnoreCase([DataSources] string context)
 		{
 			using (var db = GetDataContext(context))
-			{
+				{
 				db.Person.Count(p => p.FirstName.StartsWith("joH", StringComparison.OrdinalIgnoreCase) && p.ID == 1).Should().Be(1);
 				db.Person.Count(p => !p.FirstName.StartsWith("joH", StringComparison.OrdinalIgnoreCase) && p.ID == 1).Should().Be(0);
-			}
-		}
+				}
+				}
 
 		[Test]
 		public void StartsWith1Case([DataSources] string context)
-		{
+				{
 			using (var db = GetDataContext(context))
-			{
+				{
 				db.Person.Count(p => p.FirstName.StartsWith("Jo", StringComparison.Ordinal) && p.ID == 1).Should().Be(1);
 				db.Person.Count(p => p.FirstName.StartsWith("jo", StringComparison.Ordinal) && p.ID == 1).Should().Be(0);
 
@@ -593,7 +593,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class StringTypesTable
+		sealed class StringTypesTable
 		{
 			[Column]                                                              public int    Id             { get; set; }
 			[Column(Length = 50, CanBeNull = true, DataType = DataType.Char)]     public string CharColumn     { get; set; } = null!;
@@ -731,8 +731,8 @@ namespace Tests.Linq
 			{
 				var str   = "some";
 				
-				var result = table.Where(t => 
-						t.CharColumn.StartsWith(str)  && 
+				var result = table.Where(t =>
+						t.CharColumn.StartsWith(str)  &&
 						t.NCharColumn.StartsWith(str) &&
 						t.VarCharColumn.StartsWith(str) &&
 						t.NVarCharColumn.StartsWith(str)
@@ -990,19 +990,19 @@ namespace Tests.Linq
 			}
 		}
 
-		class Category
+		sealed class Category
 		{
 			[PrimaryKey, Identity] public int     Id;
 			[Column, NotNull]      public string? Name;
 		}
 
-		class Task
+		sealed class Task
 		{
 			[PrimaryKey, Identity] public int     Id;
 			[Column, NotNull]      public string? Name;
 		}
 
-		class TaskCategory
+		sealed class TaskCategory
 		{
 			[Column, NotNull] public int Id;
 			[Column, NotNull] public int TaskId;
@@ -1010,7 +1010,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void Stuff2([IncludeDataSources(TestProvName.AllSqlServer2008Plus)] string context)
+		public void Stuff2([IncludeDataSources(TestProvName.AllSqlServer2008Plus, TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 			{
@@ -1178,12 +1178,54 @@ namespace Tests.Linq
 			}
 		}
 
+		// for disabled providers see notes on implementation at
+		// EXpressions.TrimLeft/TrimRight
+		[Test]
+		public void TrimLeftCharacters([DataSources(
+			TestProvName.AllFirebird,
+			TestProvName.AllMySql,
+			TestProvName.AllAccess,
+			ProviderName.SqlCe,
+			TestProvName.AllSqlServer2019Minus,
+			TestProvName.AllSybase)] string context)
+		{
+			using var db = GetDataContext(context);
+			var q =
+				from p in db.Person
+				where p.ID == 1
+				select new { p.ID, Name = "  " + p.FirstName + " " } into pp
+				where pp.Name.TrimStart(' ', 'J') == "ohn "
+				select pp;
+			Assert.AreEqual(1, q.ToList().First().ID);
+		}
+
+		[Test]
+		public void TrimRightCharacters([DataSources(
+			TestProvName.AllFirebird,
+			TestProvName.AllMySql,
+			TestProvName.AllAccess,
+			ProviderName.SqlCe,
+			TestProvName.AllSqlServer2019Minus,
+			TestProvName.AllSybase)] string context)
+		{
+			using var db = GetDataContext(context);
+			var q =
+				from p in db.Person
+				where p.ID == 1
+				select new { p.ID, Name = "  " + p.FirstName + " " } into pp
+				where pp.Name.TrimEnd(' ', 'n') == "  Joh"
+				select pp;
+			Assert.AreEqual(1, q.ToList().First().ID);
+		}
+
 		[Test]
 		public void ToLower([DataSources] string context)
 		{
 			using (var db = GetDataContext(context))
 			{
+#pragma warning disable CA1311 // Specify a culture or use an invariant version
 				var q = from p in db.Person where p.FirstName.ToLower() == "john" && p.ID == 1 select p;
+#pragma warning restore CA1311 // Specify a culture or use an invariant version
 				Assert.AreEqual(1, q.ToList().First().ID);
 			}
 		}
@@ -1194,7 +1236,9 @@ namespace Tests.Linq
 			using (var db = GetDataContext(context))
 			{
 				var param = "JOHN";
+#pragma warning disable CA1311 // Specify a culture or use an invariant version
 				var q = from p in db.Person where p.FirstName.ToLower() == param.ToLower() && p.ID == 1 select p;
+#pragma warning restore CA1311 // Specify a culture or use an invariant version
 				Assert.AreEqual(1, q.ToList().First().ID);
 			}
 		}
@@ -1204,7 +1248,9 @@ namespace Tests.Linq
 		{
 			using (var db = GetDataContext(context))
 			{
+#pragma warning disable CA1311 // Specify a culture or use an invariant version
 				var q = from p in db.Person where p.FirstName.ToUpper() == "JOHN" && p.ID == 1 select p;
+#pragma warning restore CA1311 // Specify a culture or use an invariant version
 				Assert.AreEqual(1, q.ToList().First().ID);
 			}
 		}
@@ -1215,7 +1261,9 @@ namespace Tests.Linq
 			using (var db = GetDataContext(context))
 			{
 				var param = "john";
+#pragma warning disable CA1311 // Specify a culture or use an invariant version
 				var q = from p in db.Person where p.FirstName.ToUpper() == param.ToUpper() && p.ID == 1 select p;
+#pragma warning restore CA1311 // Specify a culture or use an invariant version
 				Assert.AreEqual(1, q.ToList().First().ID);
 			}
 		}
@@ -1390,6 +1438,7 @@ namespace Tests.Linq
 			}
 		}
 
+		[ActiveIssue("https://github.com/Octonica/ClickHouseClient/issues/56 + https://github.com/ClickHouse/ClickHouse/issues/37999", Configurations = new[] { ProviderName.ClickHouseMySql, ProviderName.ClickHouseOctonica })]
 		[Test]
 		public void IsNullOrEmpty2([DataSources] string context)
 		{
@@ -1401,7 +1450,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class CollatedTable
+		sealed class CollatedTable
 		{
 			[Column, PrimaryKey] public int    Id              { get; set; }
 			[Column            ] public string CaseSensitive   { get; set; } = null!;
@@ -1410,7 +1459,7 @@ namespace Tests.Linq
 			public static readonly CollatedTable TestData = new () { Id = 1, CaseSensitive = "TestString", CaseInsensitive = "TestString" };
 		}
 
-#if NETSTANDARD2_1PLUS
+#if NETCOREAPP3_1_OR_GREATER
 		[Test]
 		public void ExplicitOrdinalIgnoreCase_Contains([DataSources] string context)
 		{
@@ -1430,6 +1479,7 @@ namespace Tests.Linq
 			}
 		}
 
+		[ActiveIssue(3444, Configuration = ProviderName.SqlCe)]
 		[Test]
 		public void ExplicitOrdinal_Contains([DataSources] string context)
 		{
@@ -1449,6 +1499,7 @@ namespace Tests.Linq
 			}
 		}
 
+		[ActiveIssue(3444, Configuration = ProviderName.SqlCe)]
 		[Test]
 		public void Explicit_Contains([DataSources] string context)
 		{
@@ -1726,7 +1777,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class SampleClass
+		sealed class SampleClass
 		{
 			[Column] public int Id { get; set; }
 			[Column(DataType = DataType.NVarChar, Length = 50)] public MyClass? Value { get; set; }
@@ -1738,8 +1789,8 @@ namespace Tests.Linq
 			// providers doesn't support IConvertible parameter coercion
 			ProviderName.SQLiteMS,
 			ProviderName.DB2,
-			ProviderName.MySqlConnector,
-			TestProvName.MariaDB,
+			TestProvName.AllClickHouse,
+			TestProvName.AllMySqlConnector,
 			TestProvName.AllPostgreSQL,
 			TestProvName.AllInformix,
 			TestProvName.AllSybase)] string context)

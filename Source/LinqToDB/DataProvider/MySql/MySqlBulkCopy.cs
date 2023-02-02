@@ -9,11 +9,11 @@ namespace LinqToDB.DataProvider.MySql
 	using Common;
 	using Data;
 
-	class MySqlBulkCopy : BasicBulkCopy
+	sealed class MySqlBulkCopy : BasicBulkCopy
 	{
 		/// <summary>
 		/// Settings based on https://www.jooq.org/doc/3.12/manual/sql-building/dsl-context/custom-settings/settings-inline-threshold/
-		/// MySQL supports more but realistically this might be too much already for practical cases. 
+		/// MySQL supports more but realistically this might be too much already for practical cases.
 		/// </summary>
 		protected override int               MaxParameters => 32767;
 		/// <summary>
@@ -30,9 +30,7 @@ namespace LinqToDB.DataProvider.MySql
 		}
 
 		protected override BulkCopyRowsCopied ProviderSpecificCopy<T>(
-			ITable<T>       table,
-			BulkCopyOptions options,
-			IEnumerable<T>  source)
+			ITable<T> table, DataOptions options, IEnumerable<T> source)
 		{
 			var connections = TryGetProviderConnections(table);
 			if (connections.HasValue)
@@ -40,7 +38,7 @@ namespace LinqToDB.DataProvider.MySql
 				return ProviderSpecificCopyInternal(
 					connections.Value,
 					table,
-					options,
+					options.BulkCopyOptions,
 					source);
 			}
 
@@ -48,10 +46,7 @@ namespace LinqToDB.DataProvider.MySql
 		}
 
 		protected override Task<BulkCopyRowsCopied> ProviderSpecificCopyAsync<T>(
-			ITable<T>         table,
-			BulkCopyOptions   options,
-			IEnumerable<T>    source,
-			CancellationToken cancellationToken)
+			ITable<T> table, DataOptions options, IEnumerable<T> source, CancellationToken cancellationToken)
 		{
 			var connections = TryGetProviderConnections(table);
 			if (connections.HasValue)
@@ -59,7 +54,7 @@ namespace LinqToDB.DataProvider.MySql
 				return ProviderSpecificCopyInternalAsync(
 					connections.Value,
 					table,
-					options,
+					options.BulkCopyOptions,
 					source,
 					cancellationToken);
 			}
@@ -69,10 +64,7 @@ namespace LinqToDB.DataProvider.MySql
 
 #if NATIVE_ASYNC
 		protected override Task<BulkCopyRowsCopied> ProviderSpecificCopyAsync<T>(
-			ITable<T>           table,
-			BulkCopyOptions     options,
-			IAsyncEnumerable<T> source,
-			CancellationToken   cancellationToken)
+			ITable<T> table, DataOptions options, IAsyncEnumerable<T> source, CancellationToken cancellationToken)
 		{
 			var connections = TryGetProviderConnections(table);
 			if (connections.HasValue)
@@ -80,7 +72,7 @@ namespace LinqToDB.DataProvider.MySql
 				return ProviderSpecificCopyInternalAsync(
 					connections.Value,
 					table,
-					options,
+					options.BulkCopyOptions,
 					source,
 					cancellationToken);
 			}
@@ -94,11 +86,11 @@ namespace LinqToDB.DataProvider.MySql
 		{
 			if (table.TryGetDataConnection(out var dataConnection) && _provider.Adapter.BulkCopy != null)
 			{
-				var connection = _provider.TryGetProviderConnection(dataConnection.Connection, table.DataContext.MappingSchema);
-
+				var connection  = _provider.TryGetProviderConnection(dataConnection, dataConnection.Connection);
 				var transaction = dataConnection.Transaction;
+
 				if (connection != null && transaction != null)
-					transaction = _provider.TryGetProviderTransaction(transaction, table.DataContext.MappingSchema);
+					transaction = _provider.TryGetProviderTransaction(dataConnection, transaction);
 
 				if (connection != null && (dataConnection.Transaction == null || transaction != null))
 				{
@@ -126,7 +118,7 @@ namespace LinqToDB.DataProvider.MySql
 			var transaction    = providerConnections.ProviderTransaction;
 			var ed             = table.DataContext.MappingSchema.GetEntityDescriptor(typeof(T));
 			var columns        = ed.Columns.Where(c => !c.SkipOnInsert || options.KeepIdentity == true && c.IsIdentity).ToList();
-			var sb             = _provider.CreateSqlBuilder(table.DataContext.MappingSchema);
+			var sb             = _provider.CreateSqlBuilder(table.DataContext.MappingSchema, dataConnection.Options);
 			var rc             = new BulkCopyRowsCopied();
 
 			var bc = _provider.Adapter.BulkCopy!.Create(connection, transaction);
@@ -164,23 +156,13 @@ namespace LinqToDB.DataProvider.MySql
 				await TraceActionAsync(
 					dataConnection,
 					() =>
-					((
-#if !NETFRAMEWORK
-							bc.CanWriteToServerAsync2 ||
-#endif
-							bc.CanWriteToServerAsync)
-					? "INSERT ASYNC BULK " : "INSERT BULK ")
+					(bc.HasWriteToServerAsync ? "INSERT ASYNC BULK " : "INSERT BULK ")
 					+ tableName + "(" + string.Join(", ", columns.Select(x => x.ColumnName)) + Environment.NewLine,
 					async () => {
-#if !NETFRAMEWORK
-						if (bc.CanWriteToServerAsync2)
-							await bc.WriteToServerAsync2(rd, cancellationToken).ConfigureAwait(Configuration.ContinueOnCapturedContext);
+						if (bc.HasWriteToServerAsync)
+							await bc.WriteToServerAsync(rd, cancellationToken).ConfigureAwait(Configuration.ContinueOnCapturedContext);
 						else
-#endif
-							if (bc.CanWriteToServerAsync)
-								await bc.WriteToServerAsync(rd, cancellationToken).ConfigureAwait(Configuration.ContinueOnCapturedContext);
-							else
-								bc.WriteToServer(rd);
+							bc.WriteToServer(rd);
 						return rd.Count;
 					}).ConfigureAwait(Configuration.ContinueOnCapturedContext);
 
@@ -205,7 +187,7 @@ namespace LinqToDB.DataProvider.MySql
 			var transaction    = providerConnections.ProviderTransaction;
 			var ed             = table.DataContext.MappingSchema.GetEntityDescriptor(typeof(T));
 			var columns        = ed.Columns.Where(c => !c.SkipOnInsert || options.KeepIdentity == true && c.IsIdentity).ToList();
-			var sb             = _provider.CreateSqlBuilder(table.DataContext.MappingSchema);
+			var sb             = _provider.CreateSqlBuilder(table.DataContext.MappingSchema, dataConnection.Options);
 			var rc             = new BulkCopyRowsCopied();
 
 			var bc = _provider.Adapter.BulkCopy!.Create(connection, transaction);
@@ -272,7 +254,7 @@ namespace LinqToDB.DataProvider.MySql
 			var transaction    = providerConnections.ProviderTransaction;
 			var ed             = table.DataContext.MappingSchema.GetEntityDescriptor(typeof(T));
 			var columns        = ed.Columns.Where(c => !c.SkipOnInsert || options.KeepIdentity == true && c.IsIdentity).ToList();
-			var sb             = _provider.CreateSqlBuilder(table.DataContext.MappingSchema);
+			var sb             = _provider.CreateSqlBuilder(table.DataContext.MappingSchema, dataConnection.Options);
 			var rc             = new BulkCopyRowsCopied();
 
 			var bc = _provider.Adapter.BulkCopy!.Create(connection, transaction);
@@ -307,15 +289,12 @@ namespace LinqToDB.DataProvider.MySql
 
 				await TraceActionAsync(
 					dataConnection,
-					() => (bc.CanWriteToServerAsync2 || bc.CanWriteToServerAsync ? "INSERT ASYNC BULK " : "INSERT BULK ") + tableName + "(" + string.Join(", ", columns.Select(x => x.ColumnName)) + Environment.NewLine,
+					() => (bc.HasWriteToServerAsync ? "INSERT ASYNC BULK " : "INSERT BULK ") + tableName + "(" + string.Join(", ", columns.Select(x => x.ColumnName)) + Environment.NewLine,
 					async () => {
-						if (bc.CanWriteToServerAsync2)
-							await bc.WriteToServerAsync2(rd, cancellationToken).ConfigureAwait(Configuration.ContinueOnCapturedContext);
+						if (bc.HasWriteToServerAsync)
+							await bc.WriteToServerAsync(rd, cancellationToken).ConfigureAwait(Configuration.ContinueOnCapturedContext);
 						else
-							if (bc.CanWriteToServerAsync)
-								await bc.WriteToServerAsync(rd, cancellationToken).ConfigureAwait(Configuration.ContinueOnCapturedContext);
-							else
-								bc.WriteToServer(rd);
+							bc.WriteToServer(rd);
 						return rd.Count;
 					}).ConfigureAwait(Configuration.ContinueOnCapturedContext);
 
@@ -330,19 +309,20 @@ namespace LinqToDB.DataProvider.MySql
 #endif
 
 		protected override BulkCopyRowsCopied MultipleRowsCopy<T>(
-			ITable<T> table, BulkCopyOptions options, IEnumerable<T> source)
+			ITable<T> table, DataOptions options, IEnumerable<T> source)
 		{
 			return MultipleRowsCopy1(table, options, source);
 		}
 
 		protected override Task<BulkCopyRowsCopied> MultipleRowsCopyAsync<T>(
-			ITable<T> table, BulkCopyOptions options, IEnumerable<T> source, CancellationToken cancellationToken)
+			ITable<T> table, DataOptions options, IEnumerable<T> source, CancellationToken cancellationToken)
 		{
 			return MultipleRowsCopy1Async(table, options, source, cancellationToken);
 		}
 
 #if NATIVE_ASYNC
-		protected override Task<BulkCopyRowsCopied> MultipleRowsCopyAsync<T>(ITable<T> table, BulkCopyOptions options, IAsyncEnumerable<T> source, CancellationToken cancellationToken)
+		protected override Task<BulkCopyRowsCopied> MultipleRowsCopyAsync<T>(
+			ITable<T> table, DataOptions options, IAsyncEnumerable<T> source, CancellationToken cancellationToken)
 		{
 			return MultipleRowsCopy1Async(table, options, source, cancellationToken);
 		}

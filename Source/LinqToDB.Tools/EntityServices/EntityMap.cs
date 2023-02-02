@@ -7,7 +7,6 @@ using System.Linq.Expressions;
 
 namespace LinqToDB.Tools.EntityServices
 {
-	using System.Diagnostics.CodeAnalysis;
 	using Common;
 	using LinqToDB.Expressions;
 	using Mapper;
@@ -58,7 +57,7 @@ namespace LinqToDB.Tools.EntityServices
 			Expression<Func<T,bool>> GetPredicate(MappingSchema mappingSchema, object key);
 		}
 
-		class KeyComparer<TK> : IKeyComparer
+		sealed class KeyComparer<TK> : IKeyComparer
 		{
 			Func<TK,T>?           _mapper;
 			List<MemberAccessor>? _keyColumns;
@@ -128,7 +127,7 @@ namespace LinqToDB.Tools.EntityServices
 				else
 				{
 					var keyExpression = Expression.Constant(key);
-					var expressions   = _keyColumns.Select(kc =>
+					var expressions   = _keyColumns!.Select(kc =>
 						Expression.Equal(
 							ExpressionHelper.PropertyOrField(p, kc.Name),
 							Expression.Convert(ExpressionHelper.PropertyOrField(keyExpression, kc.Name), kc.Type)) as Expression);
@@ -149,12 +148,11 @@ namespace LinqToDB.Tools.EntityServices
 
 			if (_keyComparers == null)
 				lock (this)
-					if (_keyComparers == null)
-						_keyComparers = new ConcurrentDictionary<Type,IKeyComparer>();
+					_keyComparers ??= new ConcurrentDictionary<Type,IKeyComparer>();
 
 			var keyComparer = _keyComparers.GetOrAdd(
 				key.GetType(),
-				type => (IKeyComparer)Activator.CreateInstance(typeof(KeyComparer<>).MakeGenericType(typeof(T), type)));
+				type => (IKeyComparer)Activator.CreateInstance(typeof(KeyComparer<>).MakeGenericType(typeof(T), type))!);
 
 			var entity = keyComparer.MapKey(context.MappingSchema, key);
 

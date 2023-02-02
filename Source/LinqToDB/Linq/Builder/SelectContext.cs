@@ -25,7 +25,7 @@ namespace LinqToDB.Linq.Builder
 		#region Init
 
 #if DEBUG
-		public string _sqlQueryText => SelectQuery == null ? "" : SelectQuery.SqlText;
+		public string SqlQueryText => SelectQuery == null ? "" : SelectQuery.SqlText;
 		public string Path => this.GetPath();
 		public MethodCallExpression? Debug_MethodCall;
 #endif
@@ -375,7 +375,7 @@ namespace LinqToDB.Linq.Builder
 														ColumnDescriptor? descriptor = null;
 														if (mex is MemberExpression ma)
 														{
-															var ed = context.context.Builder.MappingSchema.GetEntityDescriptor(ma.Expression.Type);
+															var ed     = context.context.Builder.MappingSchema.GetEntityDescriptor(ma.Expression!.Type);
 															descriptor = ed.FindColumnDescriptor(ma.Member);
 														}
 														return context.context.ConvertExpressions(buildExpression, context.flags, descriptor);
@@ -459,7 +459,10 @@ namespace LinqToDB.Linq.Builder
 						newInfo[i] = si;
 					else
 					{
-						var index = SelectQuery.Select.Add(si.Query!.Select.Columns[si.Index]);
+						var index = SelectQuery.Select.Add(
+							si.Query != null
+								? si.Query.Select.Columns[si.Index]
+								: si.Sql);
 
 						newInfo[i] = new SqlInfo(si.MemberChain, SelectQuery.Select.Columns[index], SelectQuery, index);
 					}
@@ -475,7 +478,7 @@ namespace LinqToDB.Linq.Builder
 
 		readonly Dictionary<Tuple<MemberInfo?,ConvertFlags>,SqlInfo[]> _memberIndex = new ();
 
-		class SqlData
+		sealed class SqlData
 		{
 			public SqlInfo[]  Sql    = null!;
 			public MemberInfo Member = null!;
@@ -490,7 +493,7 @@ namespace LinqToDB.Linq.Builder
 						if (Body == Lambda.Parameters[i])
 							return Sequence[i].ConvertToIndex(expression, level, flags);
 
-				if (expression == null)
+				if (expression == null || expression is ContextRefExpression refExpression && refExpression.BuildContext == this)
 				{
 					var key = Tuple.Create((MemberInfo?)null, flags);
 
@@ -534,17 +537,17 @@ namespace LinqToDB.Linq.Builder
 							{
 								var p = Expression.Parameter(Body.Type, "p");
 
-								var list = new List<SqlInfo>();
+								List<SqlInfo>? list = null;
 								foreach (var m in Members)
 								{
 									if (!(m.Key is MethodInfo || flags == ConvertFlags.Key && EagerLoading.IsDetailsMember(this, m.Value)))
 									{
 										foreach (var si in ConvertToIndex(Expression.MakeMemberAccess(p, m.Key), 1, flags))
-											list.Add(si.Clone(m.Key));
+											(list ??= new()).Add(si.Clone(m.Key));
 									}
 								}
 
-								return list.ToArray();
+								return list?.ToArray() ?? Array<SqlInfo>.Empty;
 							}
 					}
 				}
@@ -988,9 +991,9 @@ namespace LinqToDB.Linq.Builder
 
 		#region SetAlias
 
-		public virtual void SetAlias(string alias)
+		public virtual void SetAlias(string? alias)
 		{
-			if (!alias.IsNullOrEmpty() && !alias.Contains('<') && SelectQuery.Select.From.Tables.Count == 1)
+			if (!string.IsNullOrEmpty(alias) && !alias!.Contains('<') && SelectQuery.Select.From.Tables.Count == 1)
 			{
 				SelectQuery.Select.From.Tables[0].Alias = alias;
 			}

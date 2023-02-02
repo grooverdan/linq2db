@@ -10,7 +10,7 @@ namespace LinqToDB.Linq.Builder
 
 	internal partial class MergeBuilder
 	{
-		internal class UpdateWhenMatched : MethodCallBuilder
+		internal sealed class UpdateWhenMatched : MethodCallBuilder
 		{
 			protected override bool CanBuildMethodCall(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo)
 			{
@@ -28,7 +28,7 @@ namespace LinqToDB.Linq.Builder
 				var predicate = methodCall.Arguments[1];
 				var setter    = methodCall.Arguments[2];
 
-				if (!(setter is ConstantExpression constSetter) || constSetter.Value != null)
+				if (!setter.IsNullValue())
 				{
 					var setterExpression = (LambdaExpression)setter.Unwrap();
 					UpdateBuilder.BuildSetterWithContext(
@@ -47,7 +47,7 @@ namespace LinqToDB.Linq.Builder
 					var keys       = sqlTable.GetKeys(false).Cast<SqlField>().ToList();
 					foreach (var field in sqlTable.Fields.Where(f => f.IsUpdatable).Except(keys))
 					{
-						var expression = LinqToDB.Expressions.Extensions.GetMemberGetter(field.ColumnDescriptor.MemberInfo, param);
+						var expression = ExpressionExtensions.GetMemberGetter(field.ColumnDescriptor.MemberInfo, param);
 						var tgtExpr    = mergeContext.TargetContext.ConvertToSql(builder.ConvertExpression(expression), 1, ConvertFlags.Field)[0].Sql;
 						var srcExpr    = mergeContext.SourceContext.ConvertToSql(builder.ConvertExpression(expression), 1, ConvertFlags.Field)[0].Sql;
 
@@ -62,7 +62,7 @@ namespace LinqToDB.Linq.Builder
 
 				statement.Operations.Add(operation);
 
-				if (!(predicate is ConstantExpression constPredicate) || constPredicate.Value != null)
+				if (!predicate.IsNullValue())
 				{
 					var condition     = (LambdaExpression)predicate.Unwrap();
 
@@ -70,12 +70,6 @@ namespace LinqToDB.Linq.Builder
 				}
 
 				return mergeContext;
-			}
-
-			protected override SequenceConvertInfo? Convert(
-				ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo, ParameterExpression? param)
-			{
-				return null;
 			}
 		}
 	}

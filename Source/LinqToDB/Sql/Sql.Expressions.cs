@@ -3,11 +3,13 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
+
 using JetBrains.Annotations;
 
 namespace LinqToDB
 {
 	using Common;
+	using Common.Internal;
 	using Expressions;
 	using Linq;
 	using Mapping;
@@ -17,7 +19,7 @@ namespace LinqToDB
 
 	public partial class Sql
 	{
-		private class FieldsExprBuilderDirect : IExtensionCallBuilder
+		private sealed class FieldsExprBuilderDirect : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -43,7 +45,7 @@ namespace LinqToDB
 			}
 		}
 
-		private class FieldNameBuilderDirect : IExtensionCallBuilder
+		private sealed class FieldNameBuilderDirect : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -71,7 +73,7 @@ namespace LinqToDB
 			}
 		}
 
-		class FieldNameBuilder : IExtensionCallBuilder
+		sealed class FieldNameBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -297,7 +299,7 @@ namespace LinqToDB
 			public abstract TableOptions TableOptions { get; }
 		}
 
-		private class TableHelper<T> : TableHelper
+		private sealed class TableHelper<T> : TableHelper
 			where T : notnull
 		{
 			private readonly ITable<T> _table;
@@ -314,7 +316,7 @@ namespace LinqToDB
 			public override TableOptions TableOptions => _table.TableOptions;
 		}
 
-		private class TableNameBuilderDirect : IExtensionCallBuilder
+		private sealed class TableNameBuilderDirect : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -331,12 +333,14 @@ namespace LinqToDB
 						builder.ResultExpression = new SqlExpression(typeof(string), tableHelper.TableName, Precedence.Primary);
 					else
 					{
+						var tableName = new SqlObjectName(
+							tableHelper.TableName,
+							Server  : (qualified & TableQualification.ServerName)   != 0 ? tableHelper.ServerName   : null,
+							Database: (qualified & TableQualification.DatabaseName) != 0 ? tableHelper.DatabaseName : null,
+							Schema  : (qualified & TableQualification.SchemaName)   != 0 ? tableHelper.SchemaName   : null);
 						var table = new SqlTable(tableType)
 						{
-							PhysicalName = tableHelper.TableName,
-							Server       = (qualified & TableQualification.ServerName)   != 0 ? tableHelper.ServerName   : null,
-							Database     = (qualified & TableQualification.DatabaseName) != 0 ? tableHelper.DatabaseName : null,
-							Schema       = (qualified & TableQualification.SchemaName)   != 0 ? tableHelper.SchemaName   : null,
+							TableName    = tableName,
 							TableOptions = (qualified & TableQualification.TableOptions) != 0 ? tableHelper.TableOptions : TableOptions.NotSet,
 						};
 
@@ -349,14 +353,18 @@ namespace LinqToDB
 
 					if (qualified != TableQualification.None)
 					{
-						var sb = new StringBuilder();
-						builder.DataContext.CreateSqlProvider().ConvertTableName(sb,
-							(qualified & TableQualification.ServerName)   != 0 ? tableHelper.ServerName   : null,
-							(qualified & TableQualification.DatabaseName) != 0 ? tableHelper.DatabaseName : null,
-							(qualified & TableQualification.SchemaName)   != 0 ? tableHelper.SchemaName   : null,
-							name,
+						using var sb = Pools.StringBuilder.Allocate();
+						builder.DataContext.CreateSqlProvider().BuildObjectName(
+							sb.Value,
+							new SqlObjectName(
+								name,
+								Server  : (qualified & TableQualification.ServerName)   != 0 ? tableHelper.ServerName   : null,
+								Database: (qualified & TableQualification.DatabaseName) != 0 ? tableHelper.DatabaseName : null,
+								Schema  : (qualified & TableQualification.SchemaName)   != 0 ? tableHelper.SchemaName   : null),
+							ConvertType.NameToQueryTable,
+							true,
 							(qualified & TableQualification.TableOptions) != 0 ? tableHelper.TableOptions : TableOptions.NotSet);
-						name = sb.ToString();
+						name = sb.Value.ToString();
 					}
 
 					builder.ResultExpression = new SqlValue(name);
@@ -364,7 +372,7 @@ namespace LinqToDB
 			}
 		}
 
-		private class TableNameBuilder : IExtensionCallBuilder
+		private sealed class TableNameBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -384,20 +392,24 @@ namespace LinqToDB
 				var qualified    = builder.Arguments.Length <= 1 ? TableQualification.Full : builder.GetValue<TableQualification>(1);
 				var isExpression = builder.Member.Name == "TableExpr";
 
-				var name = sqlTable.PhysicalName!;
+				var name = sqlTable.TableName.Name;
 
 				if (qualified != TableQualification.None)
 				{
-					var sb = new StringBuilder();
+					using var sb = Pools.StringBuilder.Allocate();
 
-					builder.DataContext.CreateSqlProvider().ConvertTableName(sb,
-						(qualified & TableQualification.ServerName)   != 0 ? sqlTable.Server       : null,
-						(qualified & TableQualification.DatabaseName) != 0 ? sqlTable.Database     : null,
-						(qualified & TableQualification.SchemaName)   != 0 ? sqlTable.Schema       : null,
-						sqlTable.PhysicalName!,
+					builder.DataContext.CreateSqlProvider().BuildObjectName(
+						sb.Value,
+						new SqlObjectName(
+							sqlTable.TableName.Name,
+							Server  : (qualified & TableQualification.ServerName)   != 0 ? sqlTable.TableName.Server       : null,
+							Database: (qualified & TableQualification.DatabaseName) != 0 ? sqlTable.TableName.Database     : null,
+							Schema  : (qualified & TableQualification.SchemaName)   != 0 ? sqlTable.TableName.Schema       : null),
+						sqlTable.SqlTableType == SqlTableType.Function ? ConvertType.NameToProcedure : ConvertType.NameToQueryTable,
+						true,
 						(qualified & TableQualification.TableOptions) != 0 ? sqlTable.TableOptions : TableOptions.NotSet);
 
-					name = sb.ToString();
+					name = sb.Value.ToString();
 				}
 
 				builder.ResultExpression = isExpression
@@ -406,7 +418,7 @@ namespace LinqToDB
 			}
 		}
 
-		private class TableSourceBuilder : IExtensionCallBuilder
+		private sealed class TableSourceBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -414,7 +426,7 @@ namespace LinqToDB
 			}
 		}
 
-		private class TableOrColumnAsFieldBuilder : IExtensionCallBuilder
+		private sealed class TableOrColumnAsFieldBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -432,11 +444,11 @@ namespace LinqToDB
 
 				var sqlTable = (SqlTable)sqlField.Table!;
 
-				builder.ResultExpression = new SqlField(sqlTable, sqlTable.Name!);
+				builder.ResultExpression = new SqlField(sqlTable, sqlTable.TableName.Name);
 			}
 		}
 
-		private class TableAsFieldBuilder : IExtensionCallBuilder
+		private sealed class TableAsFieldBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -448,11 +460,11 @@ namespace LinqToDB
 
 				var sqlTable = (SqlTable)sqlField.Table!;
 
-				builder.ResultExpression = new SqlField(sqlTable, sqlTable.Name!);
+				builder.ResultExpression = new SqlField(sqlTable, sqlTable.TableName.Name);
 			}
 		}
 
-		private class TableFieldBuilder : IExtensionCallBuilder
+		private sealed class TableFieldBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{
@@ -468,7 +480,7 @@ namespace LinqToDB
 		}
 
 		[Extension("", BuilderType = typeof(TableFieldBuilder))]
-		internal static TColumn TableField<TEntity, TColumn>([NoEnumeration] TEntity entity, string fieldName)
+		public static TColumn TableField<TEntity, TColumn>([NoEnumeration] TEntity entity, string fieldName)
 		{
 			throw new LinqToDBException("'Sql.TableField' is server side only method and used only for generating custom SQL parts");
 		}
@@ -505,14 +517,18 @@ namespace LinqToDB
 					throw new LinqToDBException("Can not provide information for qualified table name");
 
 				var sqlBuilder = dataContext.CreateSqlProvider();
-				var sb = new StringBuilder();
-				sqlBuilder.ConvertTableName(sb,
-					(qualification & TableQualification.ServerName)   != 0 ? table.ServerName   : null,
-					(qualification & TableQualification.DatabaseName) != 0 ? table.DatabaseName : null,
-					(qualification & TableQualification.SchemaName)   != 0 ? table.SchemaName   : null,
-					table.TableName,
+				using var sb   = Pools.StringBuilder.Allocate();
+				sqlBuilder.BuildObjectName(
+					sb.Value,
+					new SqlObjectName(
+						table.TableName,
+						Server  : (qualification & TableQualification.ServerName)   != 0 ? table.ServerName   : null,
+						Database: (qualification & TableQualification.DatabaseName) != 0 ? table.DatabaseName : null,
+						Schema  : (qualification & TableQualification.SchemaName)   != 0 ? table.SchemaName   : null),
+					ConvertType.NameToQueryTable,
+					true,
 					(qualification & TableQualification.TableOptions) != 0 ? table.TableOptions : TableOptions.NotSet);
-				result = sb.ToString();
+				result = sb.Value.ToString();
 			}
 
 			return result;
@@ -550,16 +566,20 @@ namespace LinqToDB
 					throw new LinqToDBException("Can not provide information for qualified table name");
 
 				var sqlBuilder = dataContext.CreateSqlProvider();
-				var sb         = new StringBuilder();
+				using var sb   = Pools.StringBuilder.Allocate();
 
-				sqlBuilder.ConvertTableName(sb,
-					(qualification & TableQualification.ServerName)   != 0 ? table.ServerName   : null,
-					(qualification & TableQualification.DatabaseName) != 0 ? table.DatabaseName : null,
-					(qualification & TableQualification.SchemaName)   != 0 ? table.SchemaName   : null,
-					table.TableName,
+				sqlBuilder.BuildObjectName(
+					sb.Value,
+					new SqlObjectName(
+						table.TableName,
+						Server  : (qualification & TableQualification.ServerName)   != 0 ? table.ServerName   : null,
+						Database: (qualification & TableQualification.DatabaseName) != 0 ? table.DatabaseName : null,
+						Schema  : (qualification & TableQualification.SchemaName)   != 0 ? table.SchemaName   : null),
+					ConvertType.NameToQueryTable,
+					true,
 					(qualification & TableQualification.TableOptions) != 0 ? table.TableOptions : TableOptions.NotSet);
 
-				name = sb.ToString();
+				name = sb.Value.ToString();
 			}
 
 			return new SqlExpression(name, Precedence.Primary);
@@ -598,7 +618,7 @@ namespace LinqToDB
 			return new SqlAliasPlaceholder();
 		}
 
-		class ExprBuilder : IExtensionCallBuilder
+		sealed class ExprBuilder : IExtensionCallBuilder
 		{
 			public void Build(ISqExtensionBuilder builder)
 			{

@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data.Linq;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -14,9 +15,7 @@ using JetBrains.Annotations;
 
 namespace LinqToDB.Extensions
 {
-	using System.Diagnostics.CodeAnalysis;
-	using Expressions;
-	using LinqToDB.Common;
+	using LinqToDB.Reflection;
 
 	[PublicAPI]
 	public static class ReflectionExtensions
@@ -29,12 +28,6 @@ namespace LinqToDB.Extensions
 
 		public static MemberInfo[] GetPublicInstanceValueMembers(this Type type)
 		{
-			if (type.IsAnonymous())
-			{
-				type.GetConstructors().Single()
-					.GetParameters().Select((p, i) => new { p.Name, i }).ToDictionary(_ => _.Name, _ => _.i);
-			}
-
 			var members = type.GetMembers(BindingFlags.Instance | BindingFlags.Public)
 				.Where(m => m.IsFieldEx() || m.IsPropertyEx() && ((PropertyInfo)m).GetIndexParameters().Length == 0);
 
@@ -215,8 +208,6 @@ namespace LinqToDB.Extensions
 			return memberInfo.MemberType == MemberTypes.Method;
 		}
 
-		private static readonly MemberInfo SQLPropertyMethod = MemberHelper.MethodOf(() => Sql.Property<string>(null!, null!)).GetGenericMethodDefinition();
-
 		/// <summary>
 		/// Determines whether member info represent a Sql.Property method.
 		/// </summary>
@@ -227,7 +218,7 @@ namespace LinqToDB.Extensions
 		public static bool IsSqlPropertyMethodEx(this MemberInfo memberInfo)
 		{
 			return memberInfo is MethodInfo methodCall && methodCall.IsGenericMethod &&
-			       methodCall.GetGenericMethodDefinition() == SQLPropertyMethod;
+			       methodCall.GetGenericMethodDefinition() == Methods.LinqToDB.SqlExt.Property;
 		}
 
 		/// <summary>
@@ -297,132 +288,12 @@ namespace LinqToDB.Extensions
 #endif
 		}
 
-		static class CacheHelper<T>
-		{
-			public static readonly ConcurrentDictionary<Type,T[]> TypeAttributes = new ();
-		}
-
-#region Attributes cache
-
-		static readonly ConcurrentDictionary<Type, IReadOnlyCollection<object>> _typeAttributesTopInternal = new ();
-
-		static IReadOnlyCollection<object> GetAttributesInternal(Type type)
-		{
-			return _typeAttributesTopInternal.GetOrAdd(type, static type => GetAttributesTreeInternal(type));
-		}
-
-		static readonly ConcurrentDictionary<Type, IReadOnlyCollection<object>> _typeAttributesInternal = new ();
-
-		static IReadOnlyCollection<object> GetAttributesTreeInternal(Type type)
-		{
-			IReadOnlyCollection<object> attrs = _typeAttributesInternal.GetOrAdd(type, x => type.GetCustomAttributes(false));
-
-			if (type.IsInterface)
-				return attrs;
-
-			// Reflection returns interfaces for the whole inheritance chain.
-			// So, we are going to get some hemorrhoid here to restore the inheritance sequence.
-			//
-			var interfaces      = type.GetInterfaces();
-			var nBaseInterfaces = type.BaseType != null? type.BaseType.GetInterfaces().Length: 0;
-			List<object>? list  = null;
-
-			for (var i = 0; i < interfaces.Length; i++)
-			{
-				var intf = interfaces[i];
-
-				if (i < nBaseInterfaces)
-				{
-					var getAttr = false;
-
-					foreach (var mi in type.GetInterfaceMapEx(intf).TargetMethods)
-					{
-						// Check if the interface is reimplemented.
-						//
-						if (mi.DeclaringType == type)
-						{
-							getAttr = true;
-							break;
-						}
-					}
-
-					if (getAttr == false)
-						continue;
-				}
-
-				var ifaceAttrs = GetAttributesTreeInternal(intf);
-				if (ifaceAttrs.Count > 0)
-				{
-					if (list != null)
-						list.AddRange(ifaceAttrs);
-					else if (attrs.Count == 0)
-						attrs = ifaceAttrs;
-					else
-						(list ??= new(attrs)).AddRange(ifaceAttrs);
-				}
-			}
-
-			if (type.BaseType != null && type.BaseType != typeof(object))
-			{
-				var baseAttrs = GetAttributesTreeInternal(type.BaseType);
-				if (baseAttrs.Count > 0)
-				{
-					if (list != null)
-						list.AddRange(baseAttrs);
-					else if (attrs.Count == 0)
-						attrs = baseAttrs;
-					else
-						(list ??= new(attrs)).AddRange(baseAttrs);
-				}
-			}
-
-			if (list != null   ) return list;
-			if (attrs.Count > 0) return attrs;
-			return Array<object>.Empty;
-		}
-
-		#endregion
-
 		/// <summary>
-		/// Returns an array of custom attributes applied to a type.
-		/// </summary>
-		/// <param name="type">A type instance.</param>
-		/// <typeparam name="T">The type of attribute to search for.
-		/// Only attributes that are assignable to this type are returned.</typeparam>
-		/// <returns>An array of custom attributes applied to this type,
-		/// or an array with zero (0) elements if no attributes have been applied.</returns>
-		public static T[] GetAttributes<T>(this Type type)
-			where T : Attribute
-		{
-			if (type == null) throw new ArgumentNullException(nameof(type));
-
-			return CacheHelper<T>.TypeAttributes.GetOrAdd(
-				type,
-				static type => GetAttributesInternal(type).OfType<T>().ToArray());
-		}
-
-		/// <summary>
-		/// Retrieves a custom attribute applied to a type.
-		/// </summary>
-		/// <param name="type">A type instance.</param>
-		/// <typeparam name="T">The type of attribute to search for.
-		/// Only attributes that are assignable to this type are returned.</typeparam>
-		/// <returns>A reference to the first custom attribute of type attributeType
-		/// that is applied to element, or null if there is no such attribute.</returns>
-		public static T GetFirstAttribute<T>(this Type type)
-			where T : Attribute
-		{
-			var attrs = GetAttributes<T>(type);
-			return attrs.Length > 0 ? attrs[0] : null!;
-		}
-
-		/// <summary>
-		/// Gets a value indicating whether a type (or type's element type)
-		/// instance can be null in the underlying data store.
+		/// Returns true, if type is <see cref="Nullable{T}"/> type.
 		/// </summary>
 		/// <param name="type">A <see cref="Type"/> instance. </param>
-		/// <returns> True, if the type parameter is a closed generic nullable type; otherwise, False.</returns>
-		/// <remarks>Arrays of Nullable types are treated as Nullable types.</remarks>
+		/// <returns><c>true</c>, if <paramref name="type"/> represents <see cref="Nullable{T}"/> type; otherwise, <c>false</c>.</returns>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static bool IsNullable(this Type type)
 		{
 			return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>);
@@ -459,12 +330,14 @@ namespace LinqToDB.Extensions
 		/// <summary>
 		/// Wraps type into <see cref="Nullable{T}"/> class.
 		/// </summary>
-		/// <param name="type">Value type to wrap.</param>
+		/// <param name="type">Value type to wrap. Must be value type (except <see cref="Nullable{T}"/> itself).</param>
 		/// <returns>Type, wrapped by <see cref="Nullable{T}"/>.</returns>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static Type AsNullable(this Type type)
 		{
-			if (type == null)          throw new ArgumentNullException(nameof(type));
+			if (type == null)      throw new ArgumentNullException(nameof(type));
 			if (!type.IsValueType) throw new ArgumentException($"{type} is not a value type");
+			if (type.IsNullable()) throw new ArgumentException($"{type} is nullable type already");
 
 			return typeof(Nullable<>).MakeGenericType(type);
 		}
@@ -558,7 +431,7 @@ namespace LinqToDB.Extensions
 		/// true if the <paramref name="type"/> derives from <paramref name="check"/>; otherwise, false.
 		/// </returns>
 		[Pure]
-		internal static bool IsSubClassOf(this Type type, Type check)
+		public static bool IsSubClassOf(this Type type, Type check)
 		{
 			if (type  == null) throw new ArgumentNullException(nameof(type));
 			if (check == null) throw new ArgumentNullException(nameof(check));
@@ -888,7 +761,7 @@ namespace LinqToDB.Extensions
 			object? GetDefaultValue();
 		}
 
-		class GetDefaultValueHelper<T> : IGetDefaultValueHelper
+		sealed class GetDefaultValueHelper<T> : IGetDefaultValueHelper
 		{
 			public object? GetDefaultValue()
 			{
@@ -913,7 +786,7 @@ namespace LinqToDB.Extensions
 
 #region MethodInfo extensions
 
-		[return: NotNullIfNotNull("method")]
+		[return: NotNullIfNotNull(nameof(method))]
 		public static PropertyInfo? GetPropertyInfo(this MethodInfo? method)
 		{
 			if (method != null)
@@ -953,24 +826,21 @@ namespace LinqToDB.Extensions
 		{
 			return
 				member.Name == "Value" &&
-				member.DeclaringType!.IsGenericType &&
-				member.DeclaringType.GetGenericTypeDefinition() == typeof(Nullable<>);
+				member.DeclaringType!.IsNullable();
 		}
 
 		public static bool IsNullableHasValueMember(this MemberInfo member)
 		{
 			return
 				member.Name == "HasValue" &&
-				member.DeclaringType!.IsGenericType &&
-				member.DeclaringType.GetGenericTypeDefinition() == typeof(Nullable<>);
+				member.DeclaringType!.IsNullable();
 		}
 
 		public static bool IsNullableGetValueOrDefault(this MemberInfo member)
 		{
 			return
 				member.Name == "GetValueOrDefault" &&
-				member.DeclaringType!.IsGenericType &&
-				member.DeclaringType.GetGenericTypeDefinition() == typeof(Nullable<>);
+				member.DeclaringType!.IsNullable();
 		}
 
 		static readonly Dictionary<Type,HashSet<Type>> _castDic = new ()
@@ -991,25 +861,17 @@ namespace LinqToDB.Extensions
 			if (fromType == toType)
 				return true;
 
-			if (_castDic.ContainsKey(toType) && _castDic[toType].Contains(fromType))
-				return true;
-
-			var tc = TypeDescriptor.GetConverter(fromType);
-
 			if (toType.IsAssignableFrom(fromType))
 				return true;
 
-			if (tc.CanConvertTo(toType))
+			if (_castDic.TryGetValue(toType, out var types) && types.Contains(fromType))
 				return true;
 
-			tc = TypeDescriptor.GetConverter(toType);
-
-			if (tc.CanConvertFrom(fromType))
-				return true;
-
-			if (fromType.GetMethods()
-				.Any(m => m.IsStatic && m.IsPublic && m.ReturnType == toType && (m.Name == "op_Implicit" || m.Name == "op_Explicit")))
-				return true;
+			foreach (var m in fromType.GetMethods())
+			{
+				if (m.IsStatic && m.IsPublic && m.ReturnType == toType && (m.Name == "op_Implicit" || m.Name == "op_Explicit"))
+					return true;
+			}
 
 			return false;
 		}
@@ -1091,9 +953,11 @@ namespace LinqToDB.Extensions
 			return
 				!type.IsPublic &&
 				 type.IsGenericType &&
+				// C# anonymous type name prefix
 				(type.Name.StartsWith("<>f__AnonymousType", StringComparison.Ordinal) ||
+				 // VB.NET anonymous type name prefix
 				 type.Name.StartsWith("VB$AnonymousType", StringComparison.Ordinal)) &&
-				type.GetCustomAttributes(typeof(CompilerGeneratedAttribute), true).Any();
+				type.HasAttribute<CompilerGeneratedAttribute>(false);
 		}
 
 		internal static MemberInfo GetMemberOverride(this Type type, MemberInfo mi)

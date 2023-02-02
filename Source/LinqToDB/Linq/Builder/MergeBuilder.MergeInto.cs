@@ -11,7 +11,7 @@ namespace LinqToDB.Linq.Builder
 
 	internal partial class MergeBuilder
 	{
-		internal class MergeInto : MethodCallBuilder
+		internal sealed class MergeInto : MethodCallBuilder
 		{
 			static readonly MethodInfo[] _supportedMethods = {MergeIntoMethodInfo1, MergeIntoMethodInfo2};
 
@@ -44,12 +44,6 @@ namespace LinqToDB.Linq.Builder
 				var source = new TableLikeQueryContext(sourceContext);
 
 				return new MergeContext(merge, target, source);
-			}
-
-			protected override SequenceConvertInfo? Convert(
-				ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo, ParameterExpression? param)
-			{
-				return null;
 			}
 		}
 	}

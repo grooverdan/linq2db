@@ -13,7 +13,7 @@ namespace LinqToDB.Linq.Builder
 	using LinqToDB.Expressions;
 	using LinqToDB.Mapping;
 
-	class ExpressionTestGenerator
+	sealed class ExpressionTestGenerator
 	{
 		readonly bool          _mangleNames;
 		readonly StringBuilder _exprBuilder = new ();
@@ -183,7 +183,7 @@ namespace LinqToDB.Linq.Builder
 					{
 						var e = (MemberExpression)expr;
 
-						Build(e.Expression);
+						Build(e.Expression!);
 						_exprBuilder.AppendFormat(".{0}", MangleName(e.Member.DeclaringType!, e.Member.Name, "P"));
 
 						return false;
@@ -201,9 +201,9 @@ namespace LinqToDB.Linq.Builder
 						var ex = (MethodCallExpression)expr;
 						var mi = ex.Method;
 
-						var attrs = mi.GetCustomAttributes(typeof(ExtensionAttribute), false);
+						var isExtension = mi.HasAttribute<ExtensionAttribute>(false);
 
-						if (attrs.Length != 0)
+						if (isExtension)
 						{
 							Build(ex.Arguments[0]);
 							PushIndent();
@@ -229,7 +229,7 @@ namespace LinqToDB.Linq.Builder
 
 						PushIndent();
 
-						var n = attrs.Length != 0 ? 1 : 0;
+						var n = isExtension ? 1 : 0;
 
 						for (var i = n; i < ex.Arguments.Count; i++)
 						{
@@ -245,7 +245,7 @@ namespace LinqToDB.Linq.Builder
 
 						_exprBuilder.Append(')');
 
-						if (attrs.Length != 0)
+						if (isExtension)
 						{
 							PopIndent();
 						}
@@ -316,7 +316,7 @@ namespace LinqToDB.Linq.Builder
 
 						if (IsAnonymous(ne.Type))
 						{
-							if (ne.Members.Count == 1)
+							if (ne.Members!.Count == 1)
 							{
 								_exprBuilder.AppendFormat("new {{ {0} = ", MangleName(ne.Members[0].DeclaringType!, ne.Members[0].Name, "P"));
 								Build(ne.Arguments[0]);
@@ -543,7 +543,7 @@ namespace LinqToDB.Linq.Builder
 				foreach (var nm in Enum.GetNames(type))
 				{
 					var attr = "";
-					var valueAttribute = type.GetField(nm)!.GetCustomAttribute<MapValueAttribute>();
+					var valueAttribute = mappingSchema.GetAttribute<MapValueAttribute>(type, type.GetField(nm)!);
 					if (valueAttribute != null)
 					{
 						attr = "[MapValue(\"" + valueAttribute.Value + "\")] ";
@@ -657,32 +657,31 @@ namespace LinqToDB.Linq.Builder
 				var ed = mappingSchema.GetEntityDescriptor(type);
 				if (ed != null && !type.IsInterface)
 				{
-					attr += "\t[Table(" + (string.IsNullOrEmpty(ed.TableName) ? "" : "\"" + ed.TableName + "\"") + ")]" + Environment.NewLine;
+					attr += "\t[Table(" + (string.IsNullOrEmpty(ed.Name.Name) ? "" : "\"" + ed.Name.Name + "\"") + ")]" + Environment.NewLine;
 				}
 
 				_typeBuilder.AppendFormat(
 					type.IsGenericType ?
 @"
-{8}	{6}{7}{1} {2}<{3}>{5}
-	{{{4}{9}
+{0}	{1}{2}{3} {4}<{8}>{5}
+	{{{6}{7}
 	}}
 "
 :
 @"
-{8}	{6}{7}{1} {2}{5}
-	{{{4}{9}
+{0}	{1}{2}{3} {4}{5}
+	{{{6}{7}
 	}}
 ",
-					MangleName(isUserName, type.Namespace, "T"),
+					attr,
+					type.IsPublic ? "public " : string.Empty,
+					type.IsAbstract && !type.IsInterface ? "abstract " : string.Empty,
 					type.IsInterface ? "interface" : type.IsClass ? "class" : "struct",
 					name,
-					type.IsGenericType ? GetTypeNames(type.GetGenericArguments(), ",") : null,
+					baseClasses.Length == 0 ? string.Empty : " : " + GetTypeNames(baseClasses),
 					string.Join("\r\n", ctors),
-					baseClasses.Length == 0 ? "" : " : " + GetTypeNames(baseClasses),
-					type.IsPublic ? "public " : "",
-					type.IsAbstract && !type.IsInterface ? "abstract " : "",
-					attr,
-					members.Length > 0 ? (ctors.Count != 0 ? "\r\n" : "") + string.Join("\r\n", members) : string.Empty);
+					members.Length > 0 ? (ctors.Count != 0 ? "\r\n" : string.Empty) + string.Join("\r\n", members) : string.Empty,
+					type.IsGenericType ? GetTypeNames(type.GetGenericArguments(), ",") : string.Empty);
 			}
 		}
 
@@ -804,7 +803,7 @@ namespace LinqToDB.Linq.Builder
 				if (idx > 0)
 					name = name.Substring(0, idx);
 
-				if (type.GetGenericTypeDefinition() == typeof(Nullable<>))
+				if (type.IsNullable())
 				{
 					name = $"{GetTypeName(args[0])}?";
 				}

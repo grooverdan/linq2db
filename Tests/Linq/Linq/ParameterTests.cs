@@ -2,11 +2,13 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading.Tasks;
 using FluentAssertions;
 using LinqToDB;
 using LinqToDB.Data;
 using LinqToDB.Linq;
 using LinqToDB.Mapping;
+using Tests.Model;
 
 using NUnit.Framework;
 
@@ -119,7 +121,6 @@ namespace Tests.Linq
 				TestProvName.AllPostgreSQL,
 				TestProvName.AllInformix,
 				ProviderName.DB2,
-				ProviderName.SQLiteMS,
 				TestProvName.AllSapHana)]
 			string context)
 		{
@@ -161,7 +162,7 @@ namespace Tests.Linq
 			}
 		}
 
-		class AllTypes
+		sealed class AllTypes
 		{
 			public decimal DecimalDataType;
 			public byte[]? BinaryDataType;
@@ -172,9 +173,9 @@ namespace Tests.Linq
 
 		// Excluded providers inline such parameter
 		[Test]
-		public void ExposeSqlDecimalParameter([DataSources(false, ProviderName.DB2, TestProvName.AllInformix)] string context)
+		public void ExposeSqlDecimalParameter([DataSources(false, ProviderName.DB2, TestProvName.AllInformix, TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = new DataConnection(context))
+			using (var db = GetDataConnection(context))
 			{
 				var p   = 123.456m;
 				var sql = db.GetTable<AllTypes>().Where(t => t.DecimalDataType == p).ToString();
@@ -187,9 +188,9 @@ namespace Tests.Linq
 
 		// DB2: see DB2SqlOptimizer.SetQueryParameter - binary parameters inlined for DB2
 		[Test]
-		public void ExposeSqlBinaryParameter([DataSources(false, ProviderName.DB2)] string context)
+		public void ExposeSqlBinaryParameter([DataSources(false, ProviderName.DB2, TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = new DataConnection(context))
+			using (var db = GetDataConnection(context))
 			{
 				var p   = new byte[] { 0, 1, 2 };
 				var sql = db.GetTable<AllTypes>().Where(t => t.BinaryDataType == p).ToString();
@@ -207,7 +208,7 @@ namespace Tests.Linq
 			{
 				var dt = TestData.DateTime;
 
-				if (context.Contains("Informix"))
+				if (context.IsAnyOf(TestProvName.AllInformix))
 					dt = new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second);
 
 				var _ = db.Types.Where(t => t.DateTimeValue == Sql.ToSql(dt)).ToList();
@@ -269,7 +270,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void TestQueryableCall([DataSources] string context)
+		public void TestQueryableCall([DataSources(TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 			{
@@ -278,21 +279,23 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void TestQueryableCallWithParameters([DataSources] string context)
+		public void TestQueryableCallWithParameters([DataSources(TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = GetDataContext(context))
-			{
-				db.Parent.Where(p => GetChildrenFiltered(db, c => c.ChildID != 5).Select(c => c.ParentID).Contains(p.ParentID)).ToList();
-			}
+			// baselines could be affected by cache
+			Query.ClearCaches();
+
+			using var db = GetDataContext(context);
+			db.Parent.Where(p => GetChildrenFiltered(db, c => c.ChildID != 5).Select(c => c.ParentID).Contains(p.ParentID)).ToList();
 		}
 
 		[Test]
-		public void TestQueryableCallWithParametersWorkaround([DataSources] string context)
+		public void TestQueryableCallWithParametersWorkaround([DataSources(TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = GetDataContext(context))
-			{
-				db.Parent.Where(p => GetChildrenFiltered(db, ChildFilter).Select(c => c.ParentID).Contains(p.ParentID)).ToList();
-			}
+			// baselines could be affected by cache
+			Query.ClearCaches();
+
+			using var db = GetDataContext(context);
+			db.Parent.Where(p => GetChildrenFiltered(db, ChildFilter).Select(c => c.ParentID).Contains(p.ParentID)).ToList();
 		}
 
 		[ActiveIssue(Configuration = TestProvName.AllSybase, Details = "CI: sybase image needs utf-8 enabled")]
@@ -362,7 +365,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class Table404One
+		sealed class Table404One
 		{
 			[Column] public int Id { get; set; }
 
@@ -374,7 +377,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class Table404Two
+		sealed class Table404Two
 		{
 			[Column] public int Id { get; set; }
 
@@ -393,7 +396,7 @@ namespace Tests.Linq
 			};
 		}
 
-		class FirstTable
+		sealed class FirstTable
 		{
 			public int Id;
 			public List<Table404Two>? Values;
@@ -475,7 +478,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class TestEqualsTable1
+		sealed class TestEqualsTable1
 		{
 			[Column]
 			public int Id { get; set; }
@@ -485,7 +488,7 @@ namespace Tests.Linq
 		}
 
 		[Table]
-		class TestEqualsTable2
+		sealed class TestEqualsTable2
 		{
 			[Column]
 			public int Id { get; set; }
@@ -495,7 +498,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void TestParameterInEquals([DataSources] string context)
+		public void TestParameterInEquals([DataSources(TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 			using (var table1 = db.CreateLocalTable<TestEqualsTable1>())
@@ -1215,6 +1218,341 @@ namespace Tests.Linq
 				res[1].String2.Should().Be("str2");
 				res[1].String3.Should().Be("str3");
 			}
+		}
+
+		private int _cnt;
+		private int _cnt1;
+		private int _cnt2;
+		private int _cnt3;
+		private int _param;
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/3450")]
+		public void TestIQueryableParameterEvaluation([DataSources(TestProvName.AllClickHouse)] string context)
+		{
+			// cached queries affect cnt values due to extra comparisons in cache
+			LinqToDB.Linq.Query.ClearCaches();
+
+			using (var db = GetDataContext(context))
+			{
+				_cnt1       = 0;
+				_cnt2       = 0;
+				_cnt3       = 0;
+				_param      = 1;
+				var persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(1, persons[0].ID);
+				Assert.AreEqual(1, _cnt1);
+				Assert.AreEqual(1, _cnt2);
+				Assert.AreEqual(1, _cnt3);
+
+				_cnt1   = 0;
+				_cnt2   = 0;
+				_cnt3   = 0;
+				_param  = 2;
+				persons = Query(db);
+
+				Assert.AreEqual(3, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 1));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 4));
+				Assert.AreEqual(3, _cnt1);
+				Assert.AreEqual(1, _cnt2);
+				Assert.AreEqual(1, _cnt3);
+
+				_cnt1   = 0;
+				_cnt2   = 0;
+				_cnt3   = 0;
+				_param  = 3;
+				persons = Query(db);
+
+				Assert.AreEqual(2, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 3));
+				Assert.AreEqual(5, _cnt1);
+				Assert.AreEqual(3, _cnt2);
+				Assert.AreEqual(1, _cnt3);
+
+				_cnt1   = 0;
+				_cnt2   = 0;
+				_cnt3   = 0;
+				_param  = 1;
+				persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(1, persons[0].ID);
+				Assert.AreEqual(4, _cnt1);
+				Assert.AreEqual(2, _cnt2);
+				Assert.AreEqual(2, _cnt3);
+
+				_cnt1   = 0;
+				_cnt2   = 0;
+				_cnt3   = 0;
+				_param  = 3;
+				persons = Query(db);
+
+				Assert.AreEqual(2, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 3));
+				Assert.AreEqual(2, _cnt1);
+				Assert.AreEqual(2, _cnt2);
+				Assert.AreEqual(2, _cnt3);
+
+				_cnt1   = 0;
+				_cnt2   = 0;
+				_cnt3   = 0;
+				_param  = 2;
+				persons = Query(db);
+
+				Assert.AreEqual(3, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 1));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 4));
+				Assert.AreEqual(4, _cnt1);
+				Assert.AreEqual(3, _cnt2);
+				Assert.AreEqual(2, _cnt3);
+			}
+
+			List<Person> Query(ITestDataContext db)
+			{
+				return db.Person
+					.Where(_ => 
+					 GetQuery1(db).Select(p => p.ID).Contains(_.ID) &&
+					(GetQuery2(db).Select(p => p.ID).Contains(_.ID) ||
+					 GetQuery3(db).Select(p => p.ID).Contains(_.ID)))
+					.ToList();
+			}
+		}
+
+		private IQueryable<Person> GetQuery1(ITestDataContext db)
+		{
+			_cnt1++;
+			var paramCopy = _param;
+			if (paramCopy == 1)
+				return db.Person.Where(p => p.ID == paramCopy);
+
+			return db.Person.Where(p => paramCopy + 1 != p.ID);
+		}
+
+		private IQueryable<Person> GetQuery2(ITestDataContext db)
+		{
+			_cnt2++;
+			var paramCopy = _param;
+			if (paramCopy == 2)
+				return db.Person.Where(p => paramCopy == p.ID);
+
+			return db.Person.Where(p => p.ID == paramCopy - 1);
+		}
+
+		private IQueryable<Person> GetQuery3(ITestDataContext db)
+		{
+			_cnt3++;
+			var paramCopy = _param;
+			if (paramCopy == 3)
+				return db.Person.Where(p => p.ID == paramCopy);
+
+			return db.Person.Where(p => paramCopy + 1 != p.ID);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/3450")]
+		public void TestIQueryableParameterEvaluationCaching([DataSources(TestProvName.AllClickHouse)] string context)
+		{
+			using (var db = GetDataContext(context))
+			{
+				_cnt1       = 0;
+				_param      = 1;
+				var persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(1, persons[0].ID);
+				//Assert.AreEqual(1, _cnt1);
+
+				_cnt1   = 0;
+				_param  = 2;
+				persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(2, persons[0].ID);
+				//Assert.AreEqual(1, _cnt1);
+
+				_cnt1   = 0;
+				_param  = 3;
+				persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(3, persons[0].ID);
+				//Assert.AreEqual(1, _cnt1);
+
+				_cnt1   = 0;
+				_param  = 4;
+				persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(4, persons[0].ID);
+				//Assert.AreEqual(1, _cnt1);
+
+				_cnt1   = 0;
+				_param  = 1;
+				persons = Query(db);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(1, persons[0].ID);
+				//Assert.AreEqual(1, _cnt1);
+			}
+
+			List<Person> Query(ITestDataContext db)
+			{
+				return db.Person
+					.Where(_ => GetQuery4(db).Select(p => p.ID).Contains(_.ID))
+					.ToList();
+			}
+		}
+
+		private IQueryable<Person> GetQuery4(ITestDataContext db)
+		{
+			_cnt1++;
+			var paramCopy = _param;
+			return db.Person.Where(p => p.ID == paramCopy);
+		}
+
+		private int[] _params = new int[30];
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/3450")]
+		public void TestIQueryableParameterEvaluationMultiThreaded([IncludeDataSources(true, TestProvName.AllSqlServer)] string context)
+		{
+			using var _ = new DisableBaseline("multi-threading");
+
+			var tasks = new Task[30];
+
+			for (var i = 0; i < tasks.Length; i++)
+			{
+				var thread = i;
+				tasks[i] = Task.Run(() => TestRunner(context, thread));
+			}
+
+			Task.WaitAll(tasks);
+		}
+
+		public void TestRunner(string context, int thread)
+		{
+			using (var db = GetDataContext(context))
+			{
+				_params[thread] = 1;
+				var persons = Query(db, thread);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(1, persons[0].ID);
+
+				_params[thread] = 2;
+				persons = Query(db, thread);
+
+				Assert.AreEqual(3, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 1));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 4));
+
+				_params[thread] = 3;
+				persons = Query(db, thread);
+
+				Assert.AreEqual(2, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 3));
+
+				_params[thread] = 1;
+				persons = Query(db, thread);
+
+				Assert.AreEqual(1, persons.Count);
+				Assert.AreEqual(1, persons[0].ID);
+
+				_params[thread] = 3;
+				persons = Query(db, thread);
+
+				Assert.AreEqual(2, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 3));
+
+				_params[thread] = 2;
+				persons = Query(db, thread);
+
+				Assert.AreEqual(3, persons.Count);
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 1));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 2));
+				Assert.AreEqual(1, persons.Count(_ => _.ID == 4));
+			}
+
+			List<Person> Query(ITestDataContext db, int thread)
+			{
+				return db.Person
+					.Where(_ => 
+					 GetQueryT1(db, thread).Select(p => p.ID).Contains(_.ID) &&
+					(GetQueryT2(db, thread).Select(p => p.ID).Contains(_.ID) ||
+					 GetQueryT3(db, thread).Select(p => p.ID).Contains(_.ID)))
+					.ToList();
+			}
+		}
+
+		private IQueryable<Person> GetQueryT1(ITestDataContext db, int thread)
+		{
+			_cnt1++;
+			var paramCopy = _params[thread];
+			if (paramCopy == 1)
+				return db.Person.Where(p => p.ID == paramCopy);
+
+			return db.Person.Where(p => paramCopy + 1 != p.ID);
+		}
+
+		private IQueryable<Person> GetQueryT2(ITestDataContext db, int thread)
+		{
+			_cnt2++;
+			var paramCopy = _params[thread];
+			if (paramCopy == 2)
+				return db.Person.Where(p => paramCopy == p.ID);
+
+			return db.Person.Where(p => p.ID == paramCopy - 1);
+		}
+
+		private IQueryable<Person> GetQueryT3(ITestDataContext db, int thread)
+		{
+			_cnt3++;
+			var paramCopy = _params[thread];
+			if (paramCopy == 3)
+				return db.Person.Where(p => p.ID == paramCopy);
+
+			return db.Person.Where(p => paramCopy + 1 != p.ID);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/3450")]
+		public void TestSimpleParameterEvaluation([DataSources] string context)
+		{
+			using (var db = GetDataContext(context))
+			{
+				_cnt        = 0;
+				_param      = 1;
+				var persons = Query(db);
+
+				Assert.AreEqual(3, persons.Count);
+				Assert.True(persons.All(p => p.ID != _param));
+				Assert.AreEqual(1, _cnt);
+
+				_cnt    = 0;
+				_param  = 2;
+				persons = Query(db);
+
+				Assert.AreEqual(3, persons.Count);
+				Assert.True(persons.All(p => p.ID != _param));
+				Assert.AreEqual(1, _cnt);
+			}
+
+			List<Person> Query(ITestDataContext db)
+			{
+				return db.Person.Where(_ => GetPersonsEnumerable().Contains(_.ID)).ToList();
+			}
+		}
+
+		private IEnumerable<int> GetPersonsEnumerable()
+		{
+			_cnt++;
+			return new[] { 1, 2, 3, 4 }.Where(_ => _ != _param);
 		}
 	}
 }

@@ -6,11 +6,13 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-using LinqToDB.Async;
-
 namespace LinqToDB.Linq
 {
-	class PersistentTable<T> : ITable<T>
+#if !NATIVE_ASYNC
+	using Async;
+#endif
+
+	sealed class PersistentTable<T> : ITable<T>
 		where T : notnull
 	{
 		private readonly IQueryable<T> _query;
@@ -52,7 +54,7 @@ namespace LinqToDB.Linq
 			return _query.Provider.CreateQuery<TElement>(expression);
 		}
 
-		public object Execute(Expression expression)
+		public object? Execute(Expression expression)
 		{
 			return _query.Provider.Execute(expression);
 		}
@@ -79,10 +81,6 @@ namespace LinqToDB.Linq
 		public string       TableName    { get; } = null!;
 		public string?      ServerName   { get; }
 		public TableOptions TableOptions { get; }
-
-		public string GetTableName()
-		{
-			return null!;
-		}
+		public string?      TableID      { get; }
 	}
 }

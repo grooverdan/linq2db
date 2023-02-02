@@ -265,9 +265,9 @@ namespace LinqToDB.Expressions
 
 					// final expressions
 				case ExpressionType.Parameter:
+				case ExpressionType.Default  :
 				case ExpressionType.Constant : break;
 
-					// TODO: comment before merge to avoid potential regressions?
 				default:
 					throw new NotImplementedException($"Unhandled expression type: {expr.NodeType}");
 			}

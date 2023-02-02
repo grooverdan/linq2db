@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
-using LinqToDB.Linq;
 
 namespace LinqToDB.SqlQuery
 {
+	using Common.Internal;
+
 	public class SqlColumn : IEquatable<SqlColumn>, ISqlExpression
 	{
 		public SqlColumn(SelectQuery? parent, ISqlExpression expression, string? alias)
@@ -32,7 +33,7 @@ namespace LinqToDB.SqlQuery
 #endif
 
 		ISqlExpression _expression;
-		
+
 		public ISqlExpression Expression
 		{
 			get => _expression;
@@ -40,13 +41,15 @@ namespace LinqToDB.SqlQuery
 			{
 				if (_expression == value)
 					return;
+				if (value == this)
+					throw new InvalidOperationException();
 				_expression = value;
 				_hashCode   = null;
 			}
 		}
 
 		SelectQuery? _parent;
-		
+
 		public SelectQuery? Parent
 		{
 			get => _parent;
@@ -63,14 +66,14 @@ namespace LinqToDB.SqlQuery
 
 		public ISqlExpression UnderlyingExpression()
 		{
-			var current = QueryHelper.UnwrapExpression(Expression);
+			var current = QueryHelper.UnwrapExpression(Expression, false);
 			while (current.ElementType == QueryElementType.Column)
 			{
 				var column      = (SqlColumn)current;
 				var columnQuery = column.Parent;
 				if (columnQuery == null || columnQuery.HasSetOperators || QueryHelper.EnumerateLevelSources(columnQuery).Take(2).Count() > 1)
 					break;
-				current = QueryHelper.UnwrapExpression(column.Expression);
+				current = QueryHelper.UnwrapExpression(column.Expression, false);
 			}
 
 			return current;
@@ -81,23 +84,30 @@ namespace LinqToDB.SqlQuery
 			get
 			{
 				if (RawAlias == null)
-				{
-					switch (Expression)
-					{
-						case SqlField    field  : return field.Alias ?? field.PhysicalName;
-						case SqlColumn   column : return column.Alias;
-						case SelectQuery query:
-							{
-								if (query.Select.Columns.Count == 1 && query.Select.Columns[0].Alias != "*")
-									return query.Select.Columns[0].Alias;
-								break;
-							}
-					}
-				}
+					return GetAlias(Expression);
 
 				return RawAlias;
 			}
 			set => RawAlias = value;
+		}
+
+		private static string? GetAlias(ISqlExpression? expr)
+		{
+			switch (expr)
+			{
+				case SqlField    field  : return field.Alias ?? field.PhysicalName;
+				case SqlColumn   column : return column.Alias;
+				case SelectQuery query  :
+					{
+						if (query.Select.Columns.Count == 1 && query.Select.Columns[0].Alias != "*")
+							return query.Select.Columns[0].Alias;
+						break;
+					}
+				case SqlExpression e
+					when e.Expr is "{0}": return GetAlias(e.Parameters[0]);
+			}
+
+			return null;
 		}
 
 		int? _hashCode;
@@ -163,7 +173,10 @@ namespace LinqToDB.SqlQuery
 
 #else
 			if (Expression is SqlField)
-				return ((IQueryElement)this).ToString(new StringBuilder(), new Dictionary<IQueryElement,IQueryElement>()).ToString();
+			{
+				using var sb = Pools.StringBuilder.Allocate();
+				return ((IQueryElement)this).ToString(sb.Value, new Dictionary<IQueryElement, IQueryElement>()).ToString();
+			}
 
 			return base.ToString()!;
 #endif
@@ -225,8 +238,7 @@ namespace LinqToDB.SqlQuery
 
 		public ISqlExpression Walk<TContext>(WalkOptions options, TContext context, Func<TContext, ISqlExpression, ISqlExpression> func)
 		{
-			if (!(options.SkipColumns && Expression is SqlColumn))
-				Expression = Expression.Walk(options, context, func)!;
+			Expression = Expression.Walk(options, context, func)!;
 
 			if (options.ProcessParent)
 				Parent = (SelectQuery)func(context, Parent!);

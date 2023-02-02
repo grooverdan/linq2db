@@ -6,13 +6,13 @@ namespace LinqToDB.DataProvider.SqlCe
 	using SqlQuery;
 	using SqlProvider;
 
-	class SqlCeSqlOptimizer : BasicSqlOptimizer
+	sealed class SqlCeSqlOptimizer : BasicSqlOptimizer
 	{
 		public SqlCeSqlOptimizer(SqlProviderFlags sqlProviderFlags) : base(sqlProviderFlags)
 		{
 		}
 
-		public override SqlStatement TransformStatement(SqlStatement statement)
+		public override SqlStatement TransformStatement(SqlStatement statement, DataOptions dataOptions)
 		{
 			// This function mutates statement which is allowed only in this place
 			CorrectSkipAndColumns(statement);
@@ -20,19 +20,19 @@ namespace LinqToDB.DataProvider.SqlCe
 			// This function mutates statement which is allowed only in this place
 			CorrectInsertParameters(statement);
 
-			CorrectFunctionParameters(statement);
+			CorrectFunctionParameters(statement, dataOptions);
 
 			statement = CorrectBooleanComparison(statement);
 
 			switch (statement.QueryType)
 			{
 				case QueryType.Delete :
-					statement = GetAlternativeDelete((SqlDeleteStatement) statement);
+					statement = GetAlternativeDelete((SqlDeleteStatement) statement, dataOptions);
 					statement.SelectQuery!.From.Tables[0].Alias = "$";
 					break;
 
 				case QueryType.Update :
-					statement = GetAlternativeUpdate((SqlUpdateStatement) statement);
+					statement = GetAlternativeUpdate((SqlUpdateStatement) statement, dataOptions);
 					break;
 			}
 
@@ -43,7 +43,7 @@ namespace LinqToDB.DataProvider.SqlCe
 			return statement;
 		}
 
-		protected static string[] LikeSqlCeCharactersToEscape = { "_", "%" };
+		private static string[] LikeSqlCeCharactersToEscape = { "_", "%" };
 
 		public override string[] LikeCharactersToEscape => LikeSqlCeCharactersToEscape;
 
@@ -85,8 +85,8 @@ namespace LinqToDB.DataProvider.SqlCe
 
 						subStrPredicate =
 							new SqlPredicate.ExprExpr(
-								new SqlFunction(typeof(byte[]), "Convert", SqlDataType.DbVarBinary, 
-									new SqlFunction(typeof(string), "SUBSTRING", 
+								new SqlFunction(typeof(byte[]), "Convert", SqlDataType.DbVarBinary,
+									new SqlFunction(typeof(string), "SUBSTRING",
 										predicate.Expr1,
 										indexExpression,
 										new SqlFunction(typeof(int), "Length", predicate.Expr2))),
@@ -191,9 +191,9 @@ namespace LinqToDB.DataProvider.SqlCe
 			});
 		}
 
-		void CorrectFunctionParameters(SqlStatement statement)
+		void CorrectFunctionParameters(SqlStatement statement, DataOptions options)
 		{
-			if (!SqlCeConfiguration.InlineFunctionParameters)
+			if (!options.FindOrDefault(SqlCeOptions.Default).InlineFunctionParameters)
 				return;
 
 			statement.Visit(static e =>
@@ -218,7 +218,7 @@ namespace LinqToDB.DataProvider.SqlCe
 			// already fixed by CorrectSkipAndColumns
 		}
 
-		protected SqlStatement CorrectBooleanComparison(SqlStatement statement)
+		private SqlStatement CorrectBooleanComparison(SqlStatement statement)
 		{
 			statement = statement.ConvertAll(this, true, static (_, e) =>
 			{

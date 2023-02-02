@@ -3,16 +3,17 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data.SqlTypes;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 
 namespace LinqToDB.SqlQuery
 {
-	using System.Numerics;
 	using Common;
+	using Common.Internal;
 	using LinqToDB.Extensions;
-	using LinqToDB.Mapping;
+	using Mapping;
 
-	public class SqlDataType : ISqlExpression
+	public class SqlDataType : ISqlExpression, IEquatable<SqlDataType>
 	{
 		#region Init
 
@@ -29,13 +30,6 @@ namespace LinqToDB.SqlQuery
 		public SqlDataType(DataType dataType, int? length)
 		{
 			Type = GetDataType(dataType).Type.WithDataType(dataType).WithLength(length);
-		}
-
-		public SqlDataType(Type type)
-		{
-			if (type == null) throw new ArgumentNullException(nameof(type));
-
-			Type = GetDataType(type).Type.WithSystemType(type);
 		}
 
 		public SqlDataType(DataType dataType, Type type)
@@ -118,7 +112,7 @@ namespace LinqToDB.SqlQuery
 
 		#region Static Members
 
-		struct TypeInfo
+		readonly struct TypeInfo
 		{
 			public TypeInfo(DataType dbType, int? maxLength, int? maxPrecision, int? maxScale, int? maxDisplaySize)
 			{
@@ -201,67 +195,6 @@ namespace LinqToDB.SqlQuery
 		public static int? GetMaxScale      (DataType dbType) { return _typeInfo[(int)dbType].MaxScale;       }
 		public static int? GetMaxDisplaySize(DataType dbType) { return _typeInfo[(int)dbType].MaxDisplaySize; }
 
-		public static SqlDataType GetDataType(Type type)
-		{
-			var underlyingType = type;
-
-			if (underlyingType.IsGenericType && underlyingType.GetGenericTypeDefinition() == typeof(Nullable<>))
-				underlyingType = underlyingType.GetGenericArguments()[0];
-
-			if (underlyingType.IsEnum)
-				underlyingType = Enum.GetUnderlyingType(underlyingType);
-
-			switch (underlyingType.GetTypeCodeEx())
-			{
-				case TypeCode.Boolean  : return Boolean;
-				case TypeCode.Char     : return DbNChar;
-				case TypeCode.SByte    : return SByte;
-				case TypeCode.Byte     : return Byte;
-				case TypeCode.Int16    : return Int16;
-				case TypeCode.UInt16   : return UInt16;
-				case TypeCode.Int32    : return Int32;
-				case TypeCode.UInt32   : return UInt32;
-				case TypeCode.Int64    : return DbInt64;
-				case TypeCode.UInt64   : return UInt64;
-				case TypeCode.Single   : return Single;
-				case TypeCode.Double   : return Double;
-				case TypeCode.Decimal  : return Decimal;
-				case TypeCode.DateTime : return DateTime;
-				case TypeCode.String   : return String;
-				case TypeCode.Object   :
-					if (underlyingType == typeof(Guid))           return Guid;
-					if (underlyingType == typeof(byte[]))         return ByteArray;
-					if (underlyingType == typeof(System.Data.Linq.Binary)) return LinqBinary;
-					if (underlyingType == typeof(char[]))         return CharArray;
-					if (underlyingType == typeof(DateTimeOffset)) return DateTimeOffset;
-					if (underlyingType == typeof(TimeSpan))       return TimeSpan;
-					break;
-
-				case TypeCode.DBNull   :
-				case TypeCode.Empty    :
-				default                : break;
-			}
-
-			if (underlyingType == typeof(SqlByte))     return SqlByte;
-			if (underlyingType == typeof(SqlInt16))    return SqlInt16;
-			if (underlyingType == typeof(SqlInt32))    return SqlInt32;
-			if (underlyingType == typeof(SqlInt64))    return SqlInt64;
-			if (underlyingType == typeof(SqlSingle))   return SqlSingle;
-			if (underlyingType == typeof(SqlBoolean))  return SqlBoolean;
-			if (underlyingType == typeof(SqlDouble))   return SqlDouble;
-			if (underlyingType == typeof(SqlDateTime)) return SqlDateTime;
-			if (underlyingType == typeof(SqlDecimal))  return SqlDecimal;
-			if (underlyingType == typeof(SqlMoney))    return SqlMoney;
-			if (underlyingType == typeof(SqlString))   return SqlString;
-			if (underlyingType == typeof(SqlBinary))   return SqlBinary;
-			if (underlyingType == typeof(SqlGuid))     return SqlGuid;
-			if (underlyingType == typeof(SqlBytes))    return SqlBytes;
-			if (underlyingType == typeof(SqlChars))    return SqlChars;
-			if (underlyingType == typeof(SqlXml))      return SqlXml;
-
-			return DbVariant;
-		}
-
 		public static SqlDataType GetDataType(DataType type)
 		{
 			return type switch
@@ -313,8 +246,7 @@ namespace LinqToDB.SqlQuery
 
 		public static bool TypeCanBeNull(Type type)
 		{
-			if (type.IsValueType == false ||
-				type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>) ||
+			if (type.IsNullableType() ||
 				typeof(INullable).IsSameOrParentOf(type))
 				return true;
 
@@ -470,8 +402,6 @@ namespace LinqToDB.SqlQuery
 
 		#endregion
 
-		public override int GetHashCode() => Type.GetHashCode();
-
 		#region ISqlExpression Members
 
 		public bool CanBeNull => false;
@@ -500,6 +430,32 @@ namespace LinqToDB.SqlQuery
 				sb.Append('(').Append(Type.Precision).Append(',').Append(Type.Scale).Append(')');
 
 			return sb;
+		}
+
+		#endregion
+
+		#region IEquatable<SqlDataType>
+
+		public override int GetHashCode()
+		{
+			return Type.GetHashCode();
+		}
+
+		public bool Equals(SqlDataType? other)
+		{
+			if (ReferenceEquals(null, other)) return false;
+			if (ReferenceEquals(this, other)) return true;
+
+			return Type.Equals(other.Type);
+		}
+
+		public override bool Equals(object? obj)
+		{
+			if (ReferenceEquals(null, obj)) return false;
+			if (ReferenceEquals(this, obj)) return true;
+			if (obj.GetType() != GetType()) return false;
+
+			return Equals((SqlDataType)obj);
 		}
 
 		#endregion

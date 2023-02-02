@@ -6,7 +6,7 @@ namespace LinqToDB.Linq.Builder
 	using LinqToDB.Expressions;
 	using SqlQuery;
 
-	class AllJoinsBuilder : MethodCallBuilder
+	sealed class AllJoinsBuilder : MethodCallBuilder
 	{
 		private static readonly string[] RightNullableOnlyMethodNames    = { "RightJoin", "FullJoin" };
 		private static readonly string[] NotRightNullableOnlyMethodNames = { "InnerJoin", "LeftJoin", "RightJoin", "FullJoin" };
@@ -68,12 +68,6 @@ namespace LinqToDB.Linq.Builder
 			}
 
 			return sequence;
-		}
-
-		protected override SequenceConvertInfo? Convert(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo,
-			ParameterExpression? param)
-		{
-			return null;
 		}
 	}
 }

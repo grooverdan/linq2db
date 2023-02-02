@@ -3,26 +3,22 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 #if NATIVE_ASYNC
 using System.Threading;
 #endif
 
 namespace LinqToDB.DataProvider
 {
-	using System.Threading.Tasks;
+	using Async;
 	using Common;
-	using LinqToDB.Async;
-	using LinqToDB.Data;
+	using Data;
 	using Mapping;
 
-	public class BulkCopyReader<T> : BulkCopyReader,
-#if NATIVE_ASYNC
-		IAsyncDisposable
-#else
-		Async.IAsyncDisposable
-#endif
+	public class BulkCopyReader<T> : BulkCopyReader, IAsyncDisposable
 	{
 		readonly IEnumerator<T>?      _enumerator;
 #if NATIVE_ASYNC
@@ -74,7 +70,7 @@ namespace LinqToDB.DataProvider
 		{
 			if (disposing && _asyncEnumerator != null)
 			{
-				SafeAwaiter.Run(() => _asyncEnumerator.DisposeAsync());
+				SafeAwaiter.Run(_asyncEnumerator.DisposeAsync);
 			}
 		}
 #endif
@@ -102,7 +98,7 @@ namespace LinqToDB.DataProvider
 
 	}
 
-	public abstract class BulkCopyReader : DbDataReader, IDataReader, IDataRecord
+	public abstract class BulkCopyReader : DbDataReader
 	{
 		public int Count;
 
@@ -122,22 +118,25 @@ namespace LinqToDB.DataProvider
 		{
 			_dataConnection = dataConnection;
 			_columns        = columns;
-			_columnTypes    = _columns.Select(c => c.GetDbDataType(true)).ToArray();
+			_columnTypes    = _columns.Select(c => c.GetConvertedDbDataType()).ToArray();
 			_ordinals       = _columns.Select((c, i) => new { c, i }).ToDictionary(_ => _.c.ColumnName, _ => _.i);
 		}
 
-		public class Parameter : IDbDataParameter
+		public class Parameter : DbParameter
 		{
-			public DbType             DbType        { get; set; }
-			public ParameterDirection Direction     { get; set; }
-			public bool               IsNullable    { get { return Value == null || Value is DBNull; } }
-			public string?            ParameterName { get; set; }
-			public string?            SourceColumn  { get; set; }
-			public DataRowVersion     SourceVersion { get; set; }
-			public object?            Value         { get; set; }
-			public byte               Precision     { get; set; }
-			public byte               Scale         { get; set; }
-			public int                Size          { get; set; }
+			public override DbType             DbType                  { get; set; }
+			public override ParameterDirection Direction               { get; set; }
+			public override bool               IsNullable              { get => Value == null || Value is DBNull; set { } }
+			[AllowNull]
+			public override string             ParameterName           { get; set; }
+			public override int                Size                    { get; set; }
+			[AllowNull]
+			public override string             SourceColumn            { get; set; }
+			public override DataRowVersion     SourceVersion           { get; set; }
+			public override bool               SourceColumnNullMapping { get; set; }
+			public override object?            Value                   { get; set; }
+
+			public override void ResetDbType() { }
 		}
 
 #region Implementation of IDataRecord
@@ -152,9 +151,11 @@ namespace LinqToDB.DataProvider
 			return _dataConnection.DataProvider.ConvertParameterType(_columns[ordinal].MemberType, _columnTypes[ordinal]);
 		}
 
-		public override object? GetValue(int ordinal)
+		public override object GetValue(int ordinal) => GetValueInternal(ordinal) ?? throw new InvalidOperationException("Value is NULL");
+
+		private object? GetValueInternal(int ordinal)
 		{
-			var value = _columns[ordinal].GetValue(Current);
+			var value = _columns[ordinal].GetProviderValue(Current);
 
 			_dataConnection.DataProvider.SetParameter(_dataConnection, _valueConverter, string.Empty, _columnTypes[ordinal], value);
 
@@ -168,7 +169,7 @@ namespace LinqToDB.DataProvider
 
 			for (var it = 0; it < count; ++it)
 			{
-				var value = _columns[it].GetValue(obj);
+				var value = _columns[it].GetProviderValue(obj);
 				_dataConnection.DataProvider.SetParameter(_dataConnection, _valueConverter, string.Empty, _columnTypes[it], value);
 				values[it] = _valueConverter.Value;
 			}
@@ -178,12 +179,12 @@ namespace LinqToDB.DataProvider
 
 		public override int FieldCount => _columns.Count;
 
-		public override long GetBytes(int ordinal, long dataOffset, byte[] buffer, int bufferOffset, int length)
+		public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length)
 		{
 			throw new NotImplementedException();
 		}
 
-		public override long GetChars(int ordinal, long dataOffset, char[] buffer, int bufferOffset, int length)
+		public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
 		{
 			throw new NotImplementedException();
 		}
@@ -202,7 +203,7 @@ namespace LinqToDB.DataProvider
 		public override string      GetString      (int ordinal) => throw new NotImplementedException();
 		public override decimal     GetDecimal     (int ordinal) => throw new NotImplementedException();
 		public override DateTime    GetDateTime    (int ordinal) => throw new NotImplementedException();
-		public override bool        IsDBNull       (int ordinal) => GetValue(ordinal) == null;
+		public override bool        IsDBNull       (int ordinal) => GetValueInternal(ordinal) == null;
 
 		public override object this[int i]       => throw new NotImplementedException();
 		public override object this[string name] => throw new NotImplementedException();
@@ -251,10 +252,11 @@ namespace LinqToDB.DataProvider
 			for (var i = 0; i < _columns.Count; ++i)
 			{
 				var columnDescriptor = _columns[i];
+				var convertedType    = columnDescriptor.GetConvertedDbDataType();
 				var row              = table.NewRow();
 
 				row[SchemaTableColumn.ColumnName]              = columnDescriptor.ColumnName;
-				row[SchemaTableColumn.DataType]                = _dataConnection.DataProvider.ConvertParameterType(columnDescriptor.MemberType, _columnTypes[i]);
+				row[SchemaTableColumn.DataType]                = _dataConnection.DataProvider.ConvertParameterType(convertedType.SystemType, _columnTypes[i]);
 				row[SchemaTableColumn.IsKey]                   = columnDescriptor.IsPrimaryKey;
 				row[SchemaTableOptionalColumn.IsAutoIncrement] = columnDescriptor.IsIdentity;
 				row[SchemaTableColumn.AllowDBNull]             = columnDescriptor.CanBeNull;
