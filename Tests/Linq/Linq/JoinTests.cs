@@ -2894,7 +2894,6 @@ namespace Tests.Linq
 		}
 		#endregion
 
-
 		[ActiveIssue(1224, Configurations = new[]
 		{
 			TestProvName.AllAccess,
@@ -2921,5 +2920,46 @@ namespace Tests.Linq
 			}
 		}
 
+		[Table]
+		private class Issue4160Person
+		{
+			[Column] public string Code { get; set; } = default!;
+
+			public static readonly Issue4160Person[] Data = new[]
+			{
+				new Issue4160Person() { Code = "SD" }
+			};
+		}
+
+		[Table]
+		private class Issue4160City
+		{
+			[Column] public string  Code { get; set; } = default!;
+			[Column] public string? Name { get; set; }
+
+			public static readonly Issue4160City[] Data = new[]
+			{
+				new Issue4160City() { Code = "SD", Name = "SYNDEY" }
+			};
+		}
+
+		[Test]
+		public void Issue4160Test([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			using var persons = db.CreateLocalTable(Issue4160Person.Data);
+			using var cities  = db.CreateLocalTable(Issue4160City.Data);
+
+			var data = (
+			 from pe in persons
+			 select new
+			 {
+				 Value = (from cc in cities
+						  where cc.Code == pe.Code
+						  select cc.Name).FirstOrDefault()
+			 }).Distinct().ToList();
+
+			Assert.That(data.Count, Is.EqualTo(1));
+		}
 	}
 }
