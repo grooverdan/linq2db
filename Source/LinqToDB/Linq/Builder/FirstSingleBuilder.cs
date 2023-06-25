@@ -328,13 +328,18 @@ namespace LinqToDB.Linq.Builder
 
 						var expr = Sequence.BuildExpression(expression, expression == null ? level : level + 1, enforceServerSide);
 
-						if (!_orDefault)
+						if (!_orDefault || !Builder.MappingSchema.IsScalarType(expr.Type))
 						{
-							var defaultValue = Expression.Convert(
-								Expression.Call(
-									null,
-									MemberHelper.MethodOf(() => SequenceException())),
-								expr.Type);
+							Expression defaultValue;
+
+							if (_orDefault)
+								defaultValue = Expression.Constant(expr.Type.GetDefaultValue(), expr.Type);
+							else
+								defaultValue = Expression.Convert(
+									Expression.Call(
+										null,
+										MemberHelper.MethodOf(() => SequenceException())),
+									expr.Type);
 
 							expr = Expression.Condition(
 								Expression.Call(
