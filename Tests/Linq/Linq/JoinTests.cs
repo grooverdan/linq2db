@@ -2944,7 +2944,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void Issue4160Test([DataSources] string context)
+		public void Issue4160Test1([DataSources] string context)
 		{
 			using var db = GetDataContext(context);
 			using var persons = db.CreateLocalTable(Issue4160Person.Data);
@@ -2958,6 +2958,24 @@ namespace Tests.Linq
 						  where cc.Code == pe.Code
 						  select cc.Name).FirstOrDefault()
 			 }).Distinct().ToList();
+
+			Assert.That(data.Count, Is.EqualTo(1));
+		}
+
+		//[Test]
+		public void Issue4160Test2([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			using var persons = db.CreateLocalTable(Issue4160Person.Data);
+			using var cities  = db.CreateLocalTable(Issue4160City.Data);
+
+			var data = (
+				from pe in persons
+				from cc in cities.Where(cc => cc.Code == pe.Code).Take(1).DefaultIfEmpty()
+				select new
+				{
+					Value = cc.Name
+				}).Distinct().ToList();
 
 			Assert.That(data.Count, Is.EqualTo(1));
 		}
