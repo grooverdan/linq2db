@@ -2950,16 +2950,19 @@ namespace Tests.Linq
 			using var persons = db.CreateLocalTable(Issue4160Person.Data);
 			using var cities  = db.CreateLocalTable(Issue4160City.Data);
 
-			var data = (
+			var query = (
 			 from pe in persons
 			 select new
 			 {
 				 Value = (from cc in cities
 						  where cc.Code == pe.Code
 						  select cc.Name).FirstOrDefault()
-			 }).Distinct().ToList();
+			 }).Distinct();
+
+			var data = query.ToList();
 
 			Assert.That(data.Count, Is.EqualTo(1));
+			Assert.That(query.GetSelectQuery().Select.Columns.Count, Is.EqualTo(1));
 		}
 
 		//[Test]
