@@ -295,8 +295,7 @@ namespace LinqToDB.Linq.Builder
 							}
 						}
 
-						return sc.Members.Count == 0;
-						//return false;
+						return false;
 					}
 
 					if (ctx is SubQueryContext sub)
